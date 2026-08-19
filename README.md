@@ -6,6 +6,12 @@ steps aside when it stops.
 
 ![The minimap mirroring a page an agent is driving](preview.png)
 
+The header splits the page across two lines: its title with the host beside it,
+and the route on its own underneath. One long URL buries both the "which site"
+and the "where in it", and those are the two questions you actually ask of a
+minimap. The route elides from the left so the tail — the id an agent just
+navigated to — survives.
+
 ## Installing
 
 ```bash

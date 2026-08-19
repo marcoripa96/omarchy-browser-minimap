@@ -45,6 +45,26 @@ Item {
   readonly property int actionTtlSec: Math.max(1, setting("actionTtlSec", 4))
   readonly property int maxActions: Math.max(1, setting("maxActions", 4))
 
+  // The host and the route are two different questions — which site is this,
+  // and where in it — so they get separate places rather than one long string
+  // where both are buried.
+  readonly property string pageHost: {
+    var url = root.svc ? root.svc.pageUrl : ""
+    var rest = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    var cut = rest.search(/[\/?#]/)
+    return cut === -1 ? rest : rest.substring(0, cut)
+  }
+  readonly property string pagePath: {
+    var url = root.svc ? root.svc.pageUrl : ""
+    // No page means no route; a bare "/" under an empty title reads as a bug.
+    if (url === "") return ""
+    var rest = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    var cut = rest.search(/[\/?#]/)
+    if (cut === -1) return "/"
+    var tail = rest.substring(cut)
+    return tail === "" ? "/" : tail
+  }
+
   readonly property bool live: svc ? svc.live : false
   readonly property bool painting: svc ? svc.painting : false
   readonly property var sessions: svc && svc.sessions ? svc.sessions : []
@@ -373,7 +393,7 @@ Item {
           // size — a line box is taller than its glyphs, so measuring against
           // pixelSize parks the light above the text it belongs to. Anchors
           // cannot reach across into the Column, but a binding can.
-          y: headerText.y + Math.round((titleLine.height - height) / 2)
+          y: headerText.y + titleRow.y + titleLine.y + Math.round((titleLine.height - height) / 2)
           color: root.painting ? Color.urgent : Util.alpha(Color.popups.text, 0.3)
           Behavior on color { ColorAnimation { duration: 220 } }
 
@@ -398,23 +418,49 @@ Item {
           anchors.topMargin: root.pad
           spacing: Math.round(root.pad * 0.4)
 
-          Text {
-            id: titleLine
+          Item {
+            id: titleRow
             width: parent.width
-            text: root.svc && root.svc.pageTitle !== "" ? root.svc.pageTitle : "agent-browser"
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            color: Color.popups.text
-            elide: Text.ElideRight
-            maximumLineCount: 1
+            height: titleLine.height
+
+            // The host is short and identifying, so it keeps its width and the
+            // title yields — but it is capped, because a long subdomain should
+            // not eat the whole line either.
+            Text {
+              id: domainLine
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              width: Math.min(implicitWidth, titleRow.width * 0.5)
+              text: root.pageHost
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              color: Util.alpha(Color.popups.text, 0.7)
+              horizontalAlignment: Text.AlignRight
+              elide: Text.ElideRight
+              maximumLineCount: 1
+            }
+
+            Text {
+              id: titleLine
+              anchors.left: parent.left
+              anchors.right: domainLine.left
+              anchors.rightMargin: root.pageHost === "" ? 0 : Style.space(8)
+              text: root.svc && root.svc.pageTitle !== "" ? root.svc.pageTitle : "agent-browser"
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              color: Color.popups.text
+              elide: Text.ElideRight
+              maximumLineCount: 1
+            }
           }
+
           Text {
             width: parent.width
-            text: root.svc ? root.svc.pageUrl : ""
+            text: root.pagePath
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             color: Util.alpha(Color.popups.text, 0.55)
-            // Elide from the left so the tail of a long path — the part that
+            // Elide from the left so the tail of a long route — the part that
             // actually says where the agent went — survives.
             elide: Text.ElideLeft
             maximumLineCount: 1
