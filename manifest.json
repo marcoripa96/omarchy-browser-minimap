@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.marcoripa96.browser-minimap",
+  "name": "Browser minimap",
+  "version": "1.0.0",
+  "author": "Marco Ripamonti",
+  "license": "MIT",
+  "description": "A live minimap of whatever agent-browser is looking at, pinned to the top right.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Panel.qml"
+  },
+  "panel": {
+    "displayName": "Browser minimap",
+    "description": "Mirrors the active agent-browser session's viewport while a coding agent drives it.",
+    "category": "AI",
+    "defaults": {
+      "fps": 4,
+      "width": 360,
+      "expandedWidth": 720,
+      "topMargin": 12,
+      "rightMargin": 12,
+      "showCaption": true,
+      "clickThrough": false,
+      "monitor": "",
+      "idleHideSec": 8,
+      "maxVisibleSec": 45,
+      "debug": false,
+      "session": ""
+    },
+    "schema": [
+      {
+        "key": "fps",
+        "type": "integer",
+        "label": "Frames per second",
+        "min": 1,
+        "max": 30,
+        "defaultValue": 4,
+        "description": "Capped server-side by agent-browser. Higher costs CPU inside omarchy-shell."
+      },
+      {
+        "key": "width",
+        "type": "integer",
+        "label": "Width (px)",
+        "min": 160,
+        "max": 1200,
+        "defaultValue": 360
+      },
+      {
+        "key": "expandedWidth",
+        "type": "integer",
+        "label": "Expanded width (px)",
+        "min": 160,
+        "max": 2400,
+        "defaultValue": 720
+      },
+      {
+        "key": "topMargin",
+        "type": "integer",
+        "label": "Top margin (px)",
+        "min": 0,
+        "max": 400,
+        "defaultValue": 12
+      },
+      {
+        "key": "rightMargin",
+        "type": "integer",
+        "label": "Right margin (px)",
+        "min": 0,
+        "max": 400,
+        "defaultValue": 12
+      },
+      {
+        "key": "showCaption",
+        "type": "boolean",
+        "label": "Show page title and URL",
+        "defaultValue": true
+      },
+      {
+        "key": "clickThrough",
+        "type": "boolean",
+        "label": "Click-through",
+        "defaultValue": false,
+        "description": "When on, the minimap never takes pointer input and cannot be expanded by clicking."
+      },
+      {
+        "key": "monitor",
+        "type": "string",
+        "label": "Monitor",
+        "defaultValue": "",
+        "description": "Output name to pin the minimap to (e.g. HDMI-A-1). Empty follows the focused monitor."
+      },
+      {
+        "key": "idleHideSec",
+        "type": "integer",
+        "label": "Hide after idle (seconds)",
+        "min": 0,
+        "max": 600,
+        "defaultValue": 8,
+        "description": "Hide once the page stops painting for this long. 0 keeps the minimap up for as long as a browser session exists."
+      },
+      {
+        "key": "maxVisibleSec",
+        "type": "integer",
+        "label": "Max visible stretch (seconds)",
+        "min": 0,
+        "max": 3600,
+        "defaultValue": 45,
+        "description": "Cap on one stretch of visibility, so a page that animates forever cannot pin the minimap up. A navigation or a change after a quiet spell starts a new stretch. 0 removes the cap."
+      },
+      {
+        "key": "debug",
+        "type": "boolean",
+        "label": "Log presence decisions",
+        "defaultValue": false,
+        "description": "Writes show/hide reasoning to the omarchy-shell journal tag. Useful when tuning the two timeouts."
+      },
+      {
+        "key": "session",
+        "type": "string",
+        "label": "Session",
+        "defaultValue": "",
+        "description": "agent-browser session name to pin to. Empty tracks whichever session is painting, which flips between them when two agents are running."
+      }
+    ]
+  },
+  "homepage": "https://github.com/marcoripa96/omarchy-browser-minimap"
+}
