@@ -45,7 +45,7 @@
       "pointerGlideMs": 380,
       "pointerColor": "#ffc83d",
       "corner": "top-right",
-      "margin": 12
+      "margin": 4
     },
     "schema": [
       {
@@ -213,7 +213,8 @@
         "label": "Gap from the corner (px)",
         "min": 0,
         "max": 400,
-        "defaultValue": 12
+        "defaultValue": 4,
+        "description": "Gap from the two edges of the chosen corner. Deliberately tighter than the window gap, since the panel sits over the desktop rather than beside other windows."
       }
     ]
   },
@@ -241,7 +242,7 @@
       "pointerGlideMs": 380,
       "pointerColor": "#ffc83d",
       "corner": "top-right",
-      "margin": 12
+      "margin": 4
     }
   }
 }
