@@ -4,6 +4,36 @@ A live mirror of whatever `agent-browser` is looking at, pinned under the bar on
 the focused output. It appears when a coding agent starts driving a browser and
 steps aside when it stops.
 
+![An agent driving a browser while the minimap mirrors it](media/demo.gif)
+
+*An agent opens this repository, snapshots it, moves over a few elements, takes
+a screenshot, and the panel expands — all watched from the corner of the
+desktop.*
+
+## What you are looking at
+
+![The minimap while an agent works](media/shot-live.png)
+
+The panel sits under the bar on the focused output. The recording light beside
+the title is lit while the page is painting, the yellow marker is where the
+agent just acted, and the stack in the corner names the last few actions.
+
+![The panel expanded](media/shot-expanded.png)
+
+Left-click to expand it — here it is mirroring this repository's own README.
+
+![Two sessions, listed down the left](media/shot-sessions.png)
+
+When more than one agent-browser session is live, a rail lists them by page
+title. Click one to watch it.
+
+![The bar switch turned off](media/shot-off.png)
+
+The globe in the bar turns the whole thing off: the panel goes, the bridge
+process exits, and nothing is left running but that icon.
+
+---
+
 ![The minimap mirroring a page an agent is driving](preview.png)
 
 The header splits the page across two lines: its title with the host beside it,
@@ -18,9 +48,9 @@ navigated to — survives.
 omarchy plugin add https://github.com/marcoripa96/omarchy-browser-minimap.git --enable
 ```
 
-That enables the panel. To get the bar switch too, add the widget to a bar
-section — `omarchy plugin enable io.github.marcoripa96.browser-minimap --section right`,
-or drag it into place.
+That is the whole install: the panel starts watching, and the switch lands in
+the right-hand side of the bar. Pass `--section left|center` to put it
+somewhere else, or drag it once it is there.
 
 ## How it works
 
@@ -234,11 +264,13 @@ back from where it was saved.
 | `pointerTrailMs`| 700     | How long the trail takes to fade                                     |
 | `pointerGlideMs`| 380     | How long the marker takes to travel between two points               |
 | `pointerColor`  | #ffc83d | Any QML colour; amber by default rather than the theme accent         |
-| `session`       | ""      | Hard pin: the bridge only ever connects to this session              |
+| `session`       | ""      | Session names to watch, comma separated; empty watches all of them   |
 | `debug`         | false   | Log show/hide reasoning to the `omarchy-shell` journal tag           |
 
-`session` and the rail are different things. `session` is durable and narrows
-what the bridge watches at all; the rail is a runtime choice among the sessions
+`session` and the rail are different things. `session` is durable, takes a
+comma-separated list, and narrows what the bridge connects to at all — which is
+also how you keep a session you would rather not have mirrored off the screen
+entirely; the rail is a runtime choice among the sessions
 it is already watching, and is deliberately not persisted — a session name from
 an hour ago means nothing after a restart.
 

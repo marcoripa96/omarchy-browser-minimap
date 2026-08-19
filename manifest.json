@@ -144,9 +144,9 @@
       {
         "key": "session",
         "type": "string",
-        "label": "Session",
+        "label": "Sessions",
         "defaultValue": "",
-        "description": "agent-browser session name to pin to. Empty tracks whichever session is painting, which flips between them when two agents are running."
+        "description": "agent-browser session names to watch, comma separated. Empty watches every session."
       },
       {
         "key": "railWidth",

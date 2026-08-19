@@ -33,9 +33,15 @@ const RUNTIME = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`
 const WATCH_DIR = path.join(RUNTIME, "agent-browser")
 const OUT_DIR = flag("--out", path.join(RUNTIME, "omarchy-browser-minimap"))
 const MAX_FPS = clamp(int(flag("--fps"), 4), 1, 30)
-// A hard pin: the bridge never even connects to anything else. Distinct from
-// the soft `select` below, which chooses among the sessions it is watching.
-const ONLY_SESSION = flag("--session", "")
+// A hard allowlist: the bridge never even connects to anything else. Accepts
+// several names, comma separated, which is how you keep the minimap scoped to
+// the agents you want mirrored — useful when one of the sessions on the box is
+// working on something you would rather not have on screen. Distinct from the
+// soft `select` below, which chooses among the sessions it is watching.
+const ONLY_SESSIONS = flag("--session", "")
+  .split(",")
+  .map(name => name.trim())
+  .filter(name => name !== "")
 // Resolving where a click landed costs one read-only query per action. Off,
 // the bridge never issues a command of any kind into a session.
 const TRACK_POINTER = args.indexOf("--track") !== -1
@@ -474,7 +480,7 @@ function scan() {
   for (const entry of entries) {
     if (!entry.endsWith(".stream")) continue
     const name = entry.slice(0, -".stream".length)
-    if (ONLY_SESSION !== "" && name !== ONLY_SESSION) continue
+    if (ONLY_SESSIONS.length > 0 && ONLY_SESSIONS.indexOf(name) === -1) continue
     let port
     try { port = parseInt(fs.readFileSync(path.join(WATCH_DIR, entry), "utf8").trim(), 10) } catch { continue }
     if (!Number.isFinite(port) || port <= 0) continue
