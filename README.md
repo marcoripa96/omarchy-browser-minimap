@@ -319,10 +319,23 @@ is dismissed are counted for the show/hide rules but never touched. Raising
 
 ## Developing
 
-This repo *is* the installed plugin: it lives at
-`~/.config/omarchy/plugins/io.github.marcoripa96.browser-minimap`, so edits are
-live and `git push` publishes them. `omarchy plugin update <id>` fast-forwards
-the same checkout on other machines.
+Keep the working copy somewhere of your own and let the install stay a plain
+clone of this repository, so what you test is what a user receives:
+
+```bash
+git clone https://github.com/marcoripa96/omarchy-browser-minimap.git ~/git/omarchy-browser-minimap
+omarchy plugin add https://github.com/marcoripa96/omarchy-browser-minimap.git
+
+# then, per change:
+git -C ~/git/omarchy-browser-minimap push
+omarchy plugin update io.github.marcoripa96.browser-minimap
+omarchy restart shell
+```
+
+Editing the installed copy directly is quicker, but it hides the difference
+between your working tree and a fresh checkout — file modes are the usual
+casualty, and `bridge.sh` losing its executable bit would break every install
+while working perfectly on the machine it was written on.
 
 ```bash
 omarchy plugin validate .                              # manifest contract
