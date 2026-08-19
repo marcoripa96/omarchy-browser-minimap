@@ -11,12 +11,26 @@ import qs.Ui
 Item {
   id: root
 
+  readonly property string pluginId: "io.github.marcoripa96.browser-minimap"
+
   property var shell: null
   property var manifest: null
+  // The host assigns this once, in Loader.onLoaded. If the service singleton
+  // has not been created by then it assigns null, and being a plain assignment
+  // rather than a binding, null is what it stays — leaving the panel inert for
+  // the life of the shell. Resolving through the host keeps it a binding, so
+  // the panel picks the service up whenever it appears.
   property var service: null
+  readonly property var svc: {
+    if (root.shell && typeof root.shell.serviceFor === "function") {
+      var resolved = root.shell.serviceFor(root.pluginId)
+      if (resolved) return resolved
+    }
+    return root.service
+  }
 
   function setting(key, fallback) {
-    return root.service ? root.service.setting(key, fallback) : fallback
+    return root.svc ? root.svc.setting(key, fallback) : fallback
   }
 
   readonly property int compactWidth: Style.space(setting("width", 360))
@@ -28,9 +42,9 @@ Item {
   readonly property int maxVisibleSec: Math.max(0, setting("maxVisibleSec", 45))
   readonly property bool debug: setting("debug", false) === true
 
-  readonly property bool live: service ? service.live : false
-  readonly property bool painting: service ? service.painting : false
-  readonly property var sessions: service && service.sessions ? service.sessions : []
+  readonly property bool live: svc ? svc.live : false
+  readonly property bool painting: svc ? svc.painting : false
+  readonly property var sessions: svc && svc.sessions ? svc.sessions : []
   readonly property int sessionCount: sessions.length
   readonly property bool showSwitcher: sessionCount > 1
 
@@ -63,8 +77,8 @@ Item {
   property bool hasPainted: false
 
   readonly property int contentWidth: expanded ? expandedWidth : compactWidth
-  readonly property real aspect: service && service.viewportW > 0 && service.viewportH > 0
-    ? service.viewportH / service.viewportW : 0.625
+  readonly property real aspect: svc && svc.viewportW > 0 && svc.viewportH > 0
+    ? svc.viewportH / svc.viewportW : 0.625
   readonly property int shotHeight: Math.round(contentWidth * aspect)
   readonly property int pad: Style.space(8)
   readonly property int headerHeight: showCaption
@@ -98,7 +112,7 @@ Item {
     }
 
     var now = Date.now()
-    var changeAt = root.service ? root.service.lastChangeAt : 0
+    var changeAt = root.svc ? root.svc.lastChangeAt : 0
     var quietFor = changeAt > 0 ? now - changeAt : 0
     var idle = root.idleHideSec > 0 && changeAt > 0 && quietFor > root.idleHideSec * 1000
     var overstayed = root.maxVisibleSec > 0 && root.shownSince > 0
@@ -113,25 +127,38 @@ Item {
 
   // A fresh action: show again, from the top of the clock.
   function beginStretch() {
-    if (root.debug) console.log("minimap: beginStretch " + (root.service ? root.service.pageUrl : ""))
+    if (root.debug) console.log("minimap: beginStretch " + (root.svc ? root.svc.pageUrl : ""))
     root.dismissed = false
     root.shownSince = Date.now()
     evaluate()
   }
 
+  // Driven by this panel's own `live`, not the service's signal. A Connections
+  // handler on the service runs before this side's binding has caught up, so
+  // it would evaluate against a stale value — and the tick below stops in the
+  // same instant, leaving nothing to correct it. That combination kept the
+  // window up after the plugin was switched off.
+  onLiveChanged: {
+    if (live) beginStretch()
+    else { shownSince = 0; dismissed = false; evaluate() }
+  }
+
   Timer {
     interval: 500
-    running: root.live
+    // Keeps ticking through the hide transition rather than stopping the
+    // instant the session goes away.
+    running: root.live || root.present
     repeat: true
     onTriggered: root.evaluate()
   }
 
+
   Connections {
-    target: root.service
+    target: root.svc
 
     // Every visual change the shown session makes.
     function onFramePathChanged() {
-      var path = root.service.framePath
+      var path = root.svc.framePath
       if (path === "" || path === root.framePath) return
       var gap = root.shownSince > 0 ? Date.now() - root.lastQueuedAt : 0
       root.framePath = path
@@ -143,15 +170,10 @@ Item {
       root.lastQueuedAt = Date.now()
     }
 
-    function onLiveChanged() {
-      if (root.service.live) root.beginStretch()
-      else { root.shownSince = 0; root.dismissed = false; root.evaluate() }
-    }
-
     // A navigation, or a deliberate switch to another session, is the clearest
     // "something is happening" signal there is.
-    function onPageUrlChanged() { if (root.service.live) root.beginStretch() }
-    function onShownChanged() { if (root.service.live) root.beginStretch() }
+    function onPageUrlChanged() { if (root.svc.live) root.beginStretch() }
+    function onShownChanged() { if (root.svc.live) root.beginStretch() }
   }
 
   property double lastQueuedAt: 0
@@ -286,7 +308,7 @@ Item {
 
           Text {
             width: parent.width
-            text: root.service && root.service.pageTitle !== "" ? root.service.pageTitle : "agent-browser"
+            text: root.svc && root.svc.pageTitle !== "" ? root.svc.pageTitle : "agent-browser"
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             color: Color.popups.text
@@ -295,7 +317,7 @@ Item {
           }
           Text {
             width: parent.width
-            text: root.service ? root.service.pageUrl : ""
+            text: root.svc ? root.svc.pageUrl : ""
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             color: Util.alpha(Color.popups.text, 0.55)
@@ -401,8 +423,8 @@ Item {
             Rectangle {
               id: chip
               required property var modelData
-              readonly property bool isShown: root.service && modelData.name === root.service.shown
-              readonly property bool isPinned: root.service && modelData.name === root.service.selected
+              readonly property bool isShown: root.svc && modelData.name === root.svc.shown
+              readonly property bool isPinned: root.svc && modelData.name === root.svc.selected
 
               height: Style.font.caption + Style.space(6)
               width: Math.min(chipLabel.implicitWidth + chipDot.width + Style.space(14),
@@ -446,9 +468,9 @@ Item {
                 // Clicking the session already pinned releases it back to
                 // automatic, so one control both pins and unpins.
                 onClicked: {
-                  if (!root.service) return
-                  if (chip.isPinned) root.service.clearSelection()
-                  else root.service.select(chip.modelData.name)
+                  if (!root.svc) return
+                  if (chip.isPinned) root.svc.clearSelection()
+                  else root.svc.select(chip.modelData.name)
                 }
               }
             }
@@ -466,7 +488,7 @@ Item {
         cursorShape: Qt.PointingHandCursor
         onClicked: (mouse) => {
           if (mouse.button === Qt.RightButton) { root.dismissed = true; root.evaluate() }
-          else if (mouse.button === Qt.MiddleButton) { if (root.service) root.service.cycle() }
+          else if (mouse.button === Qt.MiddleButton) { if (root.svc) root.svc.cycle() }
           else root.expanded = !root.expanded
         }
       }

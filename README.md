@@ -84,6 +84,15 @@ screencast that keeps ticking over an unchanged page does not read as activity.
 | Card | middle | Cycle the shown session |
 | Chip | left | Pin that session, or release it if already pinned |
 
+The bar glyph shows one thing only: white when the plugin is on, dimmed grey
+when it is off. Whether a page is currently painting shows on the panel's own
+dot and in the icon's tooltip, not in the bar colour — an icon that also turned
+red while busy made the most active state look like the alarm state, and left
+"off" and "on but idle" separated by nothing but opacity.
+
+Switching the plugin off hides the minimap immediately, whether or not it was
+on screen at the time.
+
 Off is off: the bridge process exits, its WebSocket connections close, and
 `agent-browser` stops encoding frames for a client that is no longer there. A
 disabled plugin costs nothing but the bar glyph.

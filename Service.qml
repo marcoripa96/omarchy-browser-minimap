@@ -209,7 +209,9 @@ QtObject {
     id: bridgeProc
     // Off means off: the node process exits, its WebSocket connections close,
     // and agent-browser stops encoding frames for a client that is not there.
-    running: root.enabled
+    // Waiting for the host to arrive avoids spawning a bridge against default
+    // settings and killing it a frame later once the real config lands.
+    running: root.enabled && root.shell !== null
     stdinEnabled: true
     command: root.onlySession === ""
       ? [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps)]
