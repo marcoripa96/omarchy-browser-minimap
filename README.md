@@ -54,8 +54,10 @@ animates on its own wins over one that is merely being worked on — clicking is
 how you say which one you actually care about. `auto` over IPC goes back to
 following the busiest.
 
-The rail is extra width rather than a slice out of the mirror, so the page
-keeps the size you asked for and the card grows to hold the list.
+The rail is a fixed width (`railWidth`, default 132) and extra width rather
+than a slice out of the mirror: the page keeps the size you asked for, the card
+grows to hold the list, and a title too long for the rail is cut with an
+ellipsis instead of wrapping or stretching the card.
 
 ## When it shows and when it goes away
 

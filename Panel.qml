@@ -88,7 +88,7 @@ Item {
   // point of the panel is the page, so it keeps the size it was asked for and
   // the card grows to hold the list.
   readonly property int railWidth: showSwitcher ? Style.space(setting("railWidth", 132)) : 0
-  readonly property int rowHeight: Style.font.caption * 2 + Style.space(13)
+  readonly property int rowHeight: Style.font.caption + Style.space(11)
 
   // ------------------------------------------------------------- presence
   //
@@ -480,9 +480,10 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
                 color: row.isShown ? Color.popups.text : Util.alpha(Color.popups.text, 0.65)
+                // The rail is a fixed width, so a long title is cut with an
+                // ellipsis rather than wrapping or stretching the card.
                 elide: Text.ElideRight
-                maximumLineCount: 2
-                wrapMode: Text.Wrap
+                maximumLineCount: 1
               }
 
               MouseArea {
