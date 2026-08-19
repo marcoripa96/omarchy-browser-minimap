@@ -63,7 +63,7 @@ Item {
   // ---------------------------------------------------------------- state
   property bool shouldShow: false
   property bool present: false
-  property bool expanded: false
+  readonly property bool expanded: svc ? svc.expanded : false
   property double shownSince: 0
   property bool dismissed: false
 
@@ -190,7 +190,7 @@ Item {
     interval: 260
     onTriggered: {
       root.present = false
-      root.expanded = false
+      if (root.svc) root.svc.expanded = false
       root.framePath = ""
       root.pendingPath = ""
       root.loadingFrame = false
@@ -249,8 +249,17 @@ Item {
       top: Style.space(root.setting("topMargin", 12))
       right: Style.space(root.setting("rightMargin", 12))
     }
-    implicitWidth: card.width
-    implicitHeight: card.height
+    // Sized to the largest the card can get, and left there. Binding the
+    // surface to the animating card resized the Wayland surface on every
+    // frame, and Hyprland animates layer resizes itself (layersIn/layersOut),
+    // so each of those frames started its own compositor animation. The result
+    // was two animation systems fighting over one rectangle. The surface now
+    // changes size only when the geometry genuinely changes — a rail
+    // appearing, a different viewport aspect — and the expand/collapse happens
+    // entirely inside it, on the scene graph, where it is smooth.
+    implicitWidth: card.borderLeft + root.railWidth + root.expandedWidth + card.borderRight
+    implicitHeight: card.borderTop + root.headerHeight
+      + Math.round(root.expandedWidth * root.aspect) + card.borderBottom
     color: "transparent"
 
     WlrLayershell.namespace: "omarchy-browser-minimap"
@@ -263,6 +272,11 @@ Item {
 
     BorderSurface {
       id: card
+      // The panel is anchored to the top right, so the card grows down and to
+      // the left out of that corner rather than from its own centre.
+      anchors.top: parent.top
+      anchors.right: parent.right
+      transformOrigin: Item.TopRight
       width: card.borderLeft + root.railWidth + root.contentWidth + card.borderRight
       height: card.borderTop + root.headerHeight + root.shotHeight + card.borderBottom
       color: Util.alpha(Color.background, 0.97)
@@ -271,11 +285,13 @@ Item {
       clip: true
 
       opacity: root.shouldShow ? 1 : 0
-      scale: root.shouldShow ? 1 : 0.96
-      Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-      Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-      Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-      Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+      scale: root.shouldShow ? 1 : 0.97
+      Behavior on opacity { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
+      Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutQuint } }
+      // Width and height must share a curve and a duration, or the box skews
+      // its way to the new size instead of growing.
+      Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutQuint } }
+      Behavior on height { NumberAnimation { duration: 260; easing.type: Easing.OutQuint } }
 
       Item {
         id: header
@@ -514,15 +530,18 @@ Item {
         onClicked: (mouse) => {
           if (mouse.button === Qt.RightButton) { root.dismissed = true; root.evaluate() }
           else if (mouse.button === Qt.MiddleButton) { if (root.svc) root.svc.cycle() }
-          else root.expanded = !root.expanded
+          else if (root.svc) root.svc.toggleExpanded()
         }
       }
     }
 
-    // A click-through minimap is purely ambient: an empty input region means
-    // the compositor routes every pointer event to whatever is underneath.
-    mask: root.clickThrough ? emptyRegion : null
+    // The surface is now bigger than the card, so the input region has to
+    // follow the card itself — otherwise the transparent margin would swallow
+    // clicks meant for whatever is behind it. A click-through minimap is
+    // purely ambient and takes no input at all.
+    mask: root.clickThrough ? emptyRegion : cardRegion
 
     Region { id: emptyRegion }
+    Region { id: cardRegion; item: card; radius: Style.cornerRadius }
   }
 }

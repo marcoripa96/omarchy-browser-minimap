@@ -111,7 +111,10 @@ Every control is scriptable, so it can go on a keybinding:
 omarchy-shell io.github.marcoripa96.browser-minimap toggle     # on/off
 omarchy-shell io.github.marcoripa96.browser-minimap cycle      # next session, then auto
 omarchy-shell io.github.marcoripa96.browser-minimap select foo # pin a session by name
-omarchy-shell io.github.marcoripa96.browser-minimap auto       # release the pin
+omarchy-shell io.github.marcoripa96.browser-minimap auto       # follow the busiest again
+omarchy-shell io.github.marcoripa96.browser-minimap size       # toggle compact/expanded
+omarchy-shell io.github.marcoripa96.browser-minimap expand
+omarchy-shell io.github.marcoripa96.browser-minimap collapse
 omarchy-shell io.github.marcoripa96.browser-minimap status     # JSON state
 ```
 
@@ -154,6 +157,20 @@ it is already watching, and is deliberately not persisted — a session name fro
 an hour ago means nothing after a restart.
 
 Changes to `fps` and `session` restart the bridge; the rest apply live.
+
+## Why the window is bigger than the card
+
+The layer-shell surface is sized to the largest the card can get and left
+there; the card is anchored in its top-right corner and animates inside it,
+with the input region masked to the card so the transparent margin passes
+clicks through.
+
+Binding the surface to the animating card instead — the obvious way round —
+resizes the Wayland surface on every animation frame, and Hyprland animates
+layer resizes itself (`layersIn`/`layersOut`). Every frame of the QML
+animation therefore kicked off a compositor animation of its own, and the two
+fought over the same rectangle. Expanding the card now changes the surface
+geometry not at all, and the motion runs entirely on the scene graph.
 
 ## Cost
 

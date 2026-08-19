@@ -89,6 +89,11 @@ QtObject {
 
   readonly property int sessionCount: sessions ? sessions.length : 0
 
+  // Which size the card is at. Lives here rather than in the panel so it can
+  // be driven from a keybinding as well as a click.
+  property bool expanded: false
+  function toggleExpanded() { root.expanded = !root.expanded }
+
   // Selection is deliberately not persisted: pinning a session by hand is a
   // "look at this one now" gesture, and a session name from an hour ago is
   // meaningless after a restart. `session` in settings is the durable pin.
@@ -182,6 +187,9 @@ QtObject {
       return root.selected === "" ? "auto" : root.selected
     }
     function auto(): string { root.clearSelection(); return "auto" }
+    function expand(): string { root.expanded = true; return "expanded" }
+    function collapse(): string { root.expanded = false; return "compact" }
+    function size(): string { root.toggleExpanded(); return root.expanded ? "expanded" : "compact" }
     function status(): string {
       var names = []
       for (var i = 0; i < root.sessionCount; i++) names.push(root.sessions[i].name)
