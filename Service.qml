@@ -242,13 +242,19 @@ QtObject {
     return u
   }
 
+  // Blinked by restartBridge(). Restarting must go through a binding
+  // dependency, never a write to bridge.running: an imperative assignment
+  // would sever the running binding for good, leaving the process deaf to
+  // `enabled` from the first settings change onward.
+  property bool bridgeRestarting: false
+
   property Process bridge: Process {
     id: bridgeProc
     // Off means off: the node process exits, its WebSocket connections close,
     // and agent-browser stops encoding frames for a client that is not there.
     // Waiting for the host to arrive avoids spawning a bridge against default
     // settings and killing it a frame later once the real config lands.
-    running: root.enabled && root.shell !== null
+    running: !root.bridgeRestarting && root.enabled && root.shell !== null
     stdinEnabled: true
     command: {
       var argv = [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps)]
@@ -278,7 +284,9 @@ QtObject {
   onTrackPointerChanged: restartBridge()
   function restartBridge() {
     if (!bridge.running) return
-    bridge.running = false
-    bridge.running = true
+    // Each assignment re-evaluates the running binding synchronously, so this
+    // is stop-then-start with the binding still intact afterwards.
+    root.bridgeRestarting = true
+    root.bridgeRestarting = false
   }
 }

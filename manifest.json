@@ -107,7 +107,7 @@
         "min": 0,
         "max": 600,
         "defaultValue": 8,
-        "description": "Hide once the page stops painting for this long. 0 keeps the minimap up for as long as a browser session exists."
+        "description": "Hide once the page stops painting for this long. 0 never hides on idle alone, though the max visible stretch still applies; a change after a quiet spell brings it back either way."
       },
       {
         "key": "maxVisibleSec",

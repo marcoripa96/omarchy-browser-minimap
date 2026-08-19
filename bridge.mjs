@@ -21,6 +21,18 @@ import fs from "node:fs"
 import path from "node:path"
 import readline from "node:readline"
 
+// Node's own WebSocket client shipped in 22. bridge.sh will happily exec an
+// older runtime on a box whose /usr/bin/node predates it, and the resulting
+// ReferenceError kills the bridge with nothing in the journal to say why —
+// so say why, in the same shape bridge.sh uses for "no node at all".
+if (typeof WebSocket === "undefined") {
+  process.stdout.write(JSON.stringify({
+    type: "error",
+    message: `node >= 22 required for its WebSocket client; found ${process.version}`,
+  }) + "\n")
+  process.exit(1)
+}
+
 const args = process.argv.slice(2)
 function flag(name, fallback) {
   const i = args.indexOf(name)
@@ -62,6 +74,15 @@ const RESCAN_MS = 2000
 // How long a session counts as "painting" after its last visual change. Drives
 // the per-session activity dots, not the panel's own hide timing.
 const PAINTING_MS = 1500
+// Sessions nobody is looking at still stream — their frames feed the activity
+// dots and the cached "latest" that makes switching instant — but at this rate
+// rather than the full one. Every idle stream costs its browser a JPEG encode
+// per frame, so with several sessions this is most of the steady-state cost.
+const IDLE_FPS = 1
+// How long a session keeps full rate after it was last shown. In automatic
+// mode two busy sessions can trade the shown slot several times a second, and
+// retuning means a socket reconnect — hysteresis makes that trade free.
+const DEMOTE_MS = 10000
 
 fs.mkdirSync(OUT_DIR, { recursive: true })
 for (const f of fs.readdirSync(OUT_DIR)) {
@@ -227,6 +248,10 @@ function shownSession() {
   return autoSession()
 }
 
+// Synchronous on purpose: a frame's path — and, on a switch, the switch
+// itself — is only announced once the bytes are on disk, and OUT_DIR sits on
+// tmpfs by default, where the write is a memory copy. Pointing --out at a
+// real disk makes every frame block the loop for the length of the write.
 function writeFrame(base64) {
   slot = slot ^ 1
   const target = path.join(OUT_DIR, `frame-${slot ? "b" : "a"}.jpg`)
@@ -236,8 +261,29 @@ function writeFrame(base64) {
   return target
 }
 
+// Keep the shown session at full rate and everything long out of the
+// spotlight at IDLE_FPS. The rate rides on the socket URL, so changing it
+// means a reconnect — the new socket opens before the old one closes, and the
+// old one's handlers go quiet the moment s.ws moves on, so the swap costs
+// nothing but frames that were already stale.
+function retune(shown) {
+  if (MAX_FPS <= IDLE_FPS) return
+  const now = Date.now()
+  for (const s of sessions.values()) {
+    if (s === shown) s.shownAt = now
+    if (s.retry) continue
+    const want = now - s.shownAt < DEMOTE_MS ? MAX_FPS : IDLE_FPS
+    if (want === s.fps) continue
+    s.fps = want
+    const old = s.ws
+    s.ws = openStream(s, want)
+    try { if (old) old.close() } catch {}
+  }
+}
+
 function publish() {
   const s = shownSession()
+  retune(s)
   const now = Date.now()
 
   // Report every session, so the panel can offer a switcher and the bar icon
@@ -347,21 +393,30 @@ function connect(name, port) {
   if (existing && existing.port === port) return
   if (existing) drop(name)
 
+  // Full rate from the start: a fresh session is the one most likely to be
+  // shown next, and retune() demotes it soon enough if it never is.
   const s = {
     name, port, connected: false, tabCount: 0,
     url: "", title: "", frame: "", latest: "", seq: 0, vw: 0, vh: 0,
     lastChangeAt: 0, frameHash: "", refs: {}, locating: false, ws: null, retry: null,
+    fps: MAX_FPS, shownAt: Date.now(),
   }
   sessions.set(name, s)
+  s.ws = openStream(s, s.fps)
+}
 
-  // pacing=ack means the server holds the next frame until this client says it
-  // rendered the last one, so a stalled panel drops frames instead of building
-  // a backlog of stale ones. Both settings must ride on the URL to cover the
-  // opening frame.
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/?pacing=ack&maxFps=${MAX_FPS}`)
-  s.ws = ws
+// One screencast socket for one session, at one frame rate. pacing=ack means
+// the server holds the next frame until this client says it rendered the last
+// one, so a stalled panel drops frames instead of building a backlog of stale
+// ones. Both settings must ride on the URL to cover the opening frame.
+function openStream(s, fps) {
+  const name = s.name
+  const ws = new WebSocket(`ws://127.0.0.1:${s.port}/?pacing=ack&maxFps=${fps}`)
 
   ws.onmessage = (ev) => {
+    // A socket replaced by a retune can still have messages in flight; the
+    // session has moved on, so they belong to nobody.
+    if (s.ws !== ws) return
     let msg
     try { msg = JSON.parse(ev.data) } catch { return }
 
@@ -453,6 +508,9 @@ function connect(name, port) {
   }
 
   ws.onclose = () => {
+    // A retune already replaced this socket deliberately; only the loss of
+    // the session's current socket means the session itself is in trouble.
+    if (s.ws !== ws) return
     s.connected = false
     publish()
     // The daemon can outlive a single browser; retry as long as the stream file
@@ -462,6 +520,7 @@ function connect(name, port) {
     }
   }
   ws.onerror = () => { try { ws.close() } catch {} }
+  return ws
 }
 
 function drop(name) {
@@ -523,3 +582,6 @@ for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
   process.on(sig, () => { cleanUp(); process.exit(0) })
 }
 process.on("exit", cleanUp)
+// A reader that vanished is a reason to stop, not to crash: without this an
+// abruptly dead shell turns the next publish into an unhandled EPIPE.
+process.stdout.on("error", () => process.exit(0))

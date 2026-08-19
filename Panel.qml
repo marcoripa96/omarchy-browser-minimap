@@ -51,6 +51,11 @@ Item {
   readonly property bool atLeft: corner.indexOf("left") !== -1
   readonly property int idleHideSec: Math.max(0, setting("idleHideSec", 8))
   readonly property int maxVisibleSec: Math.max(0, setting("maxVisibleSec", 45))
+  // What counts as "a quiet spell" for rule 3's revival. With idle-hide off
+  // there is no idle threshold to borrow, but the overstay cap can still hide
+  // the card, so revival falls back to the idle default rather than leaving a
+  // capped card hidden until the next navigation.
+  readonly property int reviveQuietMs: (idleHideSec > 0 ? idleHideSec : 8) * 1000
   readonly property bool debug: setting("debug", false) === true
   readonly property bool showActions: setting("showActions", true) === true
   readonly property int actionTtlSec: Math.max(1, setting("actionTtlSec", 4))
@@ -119,7 +124,10 @@ Item {
   property string framePath: ""
   property string pendingPath: ""
   property int frontIndex: 0
-  property bool loadingFrame: false
+  // Which buffer a load is in flight on; -1 when the queue is idle. Settles
+  // are matched against it, so a stale completion from a load the queue has
+  // already moved past cannot clobber the state of the one that replaced it.
+  property int backIndex: -1
   property bool hasPainted: false
 
   readonly property int contentWidth: expanded ? expandedWidth : compactWidth
@@ -251,19 +259,29 @@ Item {
         root.pendingPath = ""
         root.hasPainted = false
         root.frontIndex = 0
+        root.backIndex = -1
+        loadWatchdog.stop()
         bufA.source = ""
         bufB.source = ""
         return
       }
       if (path === root.framePath) return
-      var gap = root.shownSince > 0 ? Date.now() - root.lastQueuedAt : 0
+      var gap = root.shownSince > 0 && root.lastFrameAt > 0 ? Date.now() - root.lastFrameAt : 0
+      // The revival check runs before the visibility gate below: the frame
+      // that ends a quiet spell is the one that brings the card back, and
+      // beginStretch() flips `present` in the same call.
+      if (gap > root.reviveQuietMs) root.beginStretch()
+      else root.evaluate()
+      root.lastFrameAt = Date.now()
+      // A frame the card cannot show is not worth decoding. While hidden only
+      // the bookkeeping above runs, and syncFromService() picks up whatever
+      // frame is current the moment the card comes back. The second framePath
+      // check is not the one above repeated: a revival flips `present` inside
+      // beginStretch(), and syncFromService() may have adopted this very path
+      // on the way — queuing it again would decode the same file twice.
+      if (!root.present || path === root.framePath) return
       root.framePath = path
       root.queueFrame(path)
-      if (root.idleHideSec > 0 && root.lastQueuedAt > 0 && gap > root.idleHideSec * 1000)
-        root.beginStretch()
-      else
-        root.evaluate()
-      root.lastQueuedAt = Date.now()
     }
 
     // A navigation, or a deliberate switch to another session, is the clearest
@@ -279,7 +297,9 @@ Item {
     }
   }
 
-  property double lastQueuedAt: 0
+  // When the last frame was observed — whether or not it was decoded — which
+  // is the clock rule 3 measures its quiet spells against.
+  property double lastFrameAt: 0
 
   onShouldShowChanged: {
     if (shouldShow) { hideTimer.stop(); present = true }
@@ -294,7 +314,8 @@ Item {
       if (root.svc) root.svc.expanded = false
       root.framePath = ""
       root.pendingPath = ""
-      root.loadingFrame = false
+      root.backIndex = -1
+      loadWatchdog.stop()
       root.hasPainted = false
       actionModel.clear()
       bufA.source = ""
@@ -357,10 +378,10 @@ Item {
 
   function queueFrame(pathname) {
     if (pathname === "") return
-    if (root.loadingFrame) { root.pendingPath = pathname; return }
-    root.loadingFrame = true
+    if (root.backIndex !== -1) { root.pendingPath = pathname; return }
+    root.backIndex = root.frontIndex === 0 ? 1 : 0
     loadWatchdog.restart()
-    var back = root.frontIndex === 0 ? bufB : bufA
+    var back = root.backIndex === 1 ? bufB : bufA
     // Clearing first guarantees a status transition even when the bridge hands
     // this buffer the same file name it already holds. The back buffer is
     // invisible, so blanking it costs nothing on screen.
@@ -369,8 +390,11 @@ Item {
   }
 
   function bufferSettled(index, ok) {
+    // Only the load in flight may settle the queue; anything else is a stale
+    // completion from a buffer the queue has already moved past.
+    if (root.backIndex === -1 || index !== root.backIndex) return
     loadWatchdog.stop()
-    root.loadingFrame = false
+    root.backIndex = -1
     if (ok) {
       root.frontIndex = index
       root.hasPainted = true
@@ -383,11 +407,11 @@ Item {
   }
 
   // A frame file can vanish under a reader if the bridge restarts mid-load.
-  // Without this the queue would wedge on loadingFrame forever.
+  // Without this the queue would wedge on a busy backIndex forever.
   Timer {
     id: loadWatchdog
     interval: 2000
-    onTriggered: root.bufferSettled(root.frontIndex, false)
+    onTriggered: root.bufferSettled(root.backIndex, false)
   }
 
   // ------------------------------------------------------------------ view
@@ -593,7 +617,7 @@ Item {
           opacity: root.frontIndex === 0 ? 1 : 0
           onStatusChanged: {
             if (status === Image.Ready) root.bufferSettled(0, true)
-            else if (status === Image.Error) root.bufferSettled(root.frontIndex, false)
+            else if (status === Image.Error) root.bufferSettled(0, false)
           }
         }
 
@@ -608,7 +632,7 @@ Item {
           opacity: root.frontIndex === 1 ? 1 : 0
           onStatusChanged: {
             if (status === Image.Ready) root.bufferSettled(1, true)
-            else if (status === Image.Error) root.bufferSettled(root.frontIndex, false)
+            else if (status === Image.Error) root.bufferSettled(1, false)
           }
         }
 

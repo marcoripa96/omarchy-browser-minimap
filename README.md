@@ -277,7 +277,8 @@ entirely; the rail is a runtime choice among the sessions
 it is already watching, and is deliberately not persisted — a session name from
 an hour ago means nothing after a restart.
 
-Changes to `fps` and `session` restart the bridge; the rest apply live.
+Changes to `fps`, `session` and `showPointer` restart the bridge; the rest
+apply live.
 
 ## Why the window covers the whole output
 
@@ -302,13 +303,19 @@ the current screen. Use `monitor` to pin it to a different one.
 At the default 4fps a 1440x900 viewport is roughly 150KB per changed frame,
 written to tmpfs and decoded once. Only the shown session's frames are written;
 the rest are tracked for their activity dot and kept in memory in case you
-switch to them. Raising `fps` raises both linearly, and the decode happens
-inside `omarchy-shell` — worth remembering before setting it to 30.
+switch to them — and their streams drop to 1fps once they have been out of the
+spotlight for ten seconds, since an idle stream still costs its browser a JPEG
+encode per frame. A hidden card decodes nothing: frames that arrive while it
+is dismissed are counted for the show/hide rules but never touched. Raising
+`fps` raises everything linearly, and the decode happens inside
+`omarchy-shell` — worth remembering before setting it to 30.
 
 ## Requirements
 
 - `agent-browser` on the box (any session, headless or headed)
-- a `node` runtime; `bridge.sh` probes the mise shim, `$PATH`, and `/usr/bin`
+- `node` 22 or newer — the bridge uses Node's built-in WebSocket client, and
+  reports itself unusable on an older runtime rather than dying silently;
+  `bridge.sh` probes the mise shim, `$PATH`, and `/usr/bin`
 
 ## Developing
 
