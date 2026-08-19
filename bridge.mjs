@@ -508,9 +508,18 @@ setInterval(() => { scan() }, RESCAN_MS)
 setInterval(publish, 700)
 scan()
 
-for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
-  process.on(sig, () => {
-    for (const name of [...sessions.keys()]) drop(name)
-    process.exit(0)
-  })
+// Nothing of this should outlive the process. The frames are the only thing
+// the plugin writes anywhere, and leaving them behind would mean an uninstall
+// left a directory of screenshots sitting in the runtime tree until reboot.
+function cleanUp() {
+  for (const name of [...sessions.keys()]) drop(name)
+  try {
+    for (const f of fs.readdirSync(OUT_DIR)) fs.unlinkSync(path.join(OUT_DIR, f))
+    fs.rmdirSync(OUT_DIR)
+  } catch {}
 }
+
+for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+  process.on(sig, () => { cleanUp(); process.exit(0) })
+}
+process.on("exit", cleanUp)

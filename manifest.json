@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "Marco Ripamonti",
   "license": "MIT",
-  "description": "A live minimap of whatever agent-browser is looking at, pinned to the top right.",
+  "description": "A live view of what agent-browser is doing: the page an agent is driving, mirrored in a corner of the desktop.",
   "kinds": [
     "service",
     "panel",
@@ -220,7 +220,7 @@
   },
   "panel": {
     "displayName": "Browser minimap",
-    "description": "Mirrors the active agent-browser session's viewport while a coding agent drives it.",
+    "description": "A live view of what agent-browser is doing: the page an agent is driving, mirrored in a corner of the desktop.",
     "defaults": {
       "fps": 4,
       "width": 360,
