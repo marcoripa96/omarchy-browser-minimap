@@ -61,11 +61,12 @@ the port in a file:
 $XDG_RUNTIME_DIR/agent-browser/<session>.stream    ->  e.g. 39747
 ```
 
-`bridge.mjs` watches that directory, connects to every session it finds, and
-prints one JSON state line per change on stdout. `Service.qml` owns that process
-and all the state derived from it; `Panel.qml` renders it and `BarWidget.qml`
-switches it. Nothing polls the agent, and nothing needs the browser to be headed
-— the stream works fine against a headless Chrome.
+The bridge — a small Rust daemon, source in `bridge/` — watches that directory,
+connects to every session it finds, and prints one JSON state line per change
+on stdout. `Service.qml` owns that process and all the state derived from it;
+`Panel.qml` renders it and `BarWidget.qml` switches it. Nothing polls the
+agent, and nothing needs the browser to be headed — the stream works fine
+against a headless Chrome.
 
 Frames arrive as base64 JPEG. The bridge writes them to
 `$XDG_RUNTIME_DIR/omarchy-browser-minimap/frame-{a,b}.jpg` rather than piping
@@ -313,9 +314,14 @@ is dismissed are counted for the show/hide rules but never touched. Raising
 ## Requirements
 
 - `agent-browser` on the box (any session, headless or headed)
-- `node` 22 or newer — the bridge uses Node's built-in WebSocket client, and
-  reports itself unusable on an older runtime rather than dying silently;
-  `bridge.sh` probes the mise shim, `$PATH`, and `/usr/bin`
+
+The bridge itself is a static binary with no runtime dependencies. `bridge.sh`
+fetches the one matching `uname -m` (x86_64 or aarch64) from this repository's
+releases the first time the plugin starts, caches it under
+`~/.cache/omarchy-browser-minimap/` keyed to the plugin version, and execs it —
+so the only tool it needs is `curl`, and only for that first run. On any other
+architecture, build it yourself: `cargo build --release` in `bridge/` produces
+a binary `bridge.sh` prefers over the download.
 
 ## Developing
 
@@ -348,5 +354,23 @@ journalctl --user -t omarchy-shell -f                  # the shell's log
 Run the bridge on its own to see exactly what the shell sees:
 
 ```bash
-./bridge.sh ./bridge.mjs --fps 4
+./bridge.sh --fps 4
 ```
+
+`bridge.sh` prefers a dev build at `bridge/target/release/` over the
+downloaded release binary, so a working copy tests its own code:
+
+```bash
+cargo build --release --manifest-path bridge/Cargo.toml
+cargo test --manifest-path bridge/Cargo.toml
+cargo clippy --all-targets --locked --manifest-path bridge/Cargo.toml -- -D warnings
+```
+
+The release workflow runs the tests, clippy and `cargo fmt --check` before it
+builds anything, so a tag with a lint failure never becomes a release.
+
+`OMARCHY_BROWSER_MINIMAP_BRIDGE` overrides the binary path outright — useful
+for pointing an installed plugin at a build in your working copy. Releasing is
+pushing a tag `v<version>` matching `manifest.json`: the release workflow
+builds static binaries for both architectures and attaches them where
+`bridge.sh` expects to find them.

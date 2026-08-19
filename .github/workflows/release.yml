@@ -1,0 +1,62 @@
+# Builds the bridge as a static musl binary per architecture and attaches
+# both to the release for the pushed tag. bridge.sh downloads the one
+# matching `uname -m` on first run, keyed to the version in manifest.json —
+# the check job enforces that a tag is `v<manifest version>` so installs can
+# always find the asset, and the release is created only after both builds
+# succeed so it can never ship with one architecture missing.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag matches manifest.json and Cargo.toml
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -n1)"
+          crate="$(sed -n 's/^version = "\(.*\)"$/\1/p' bridge/Cargo.toml | head -n1)"
+          echo "tag=$tag manifest=$manifest crate=$crate"
+          [ "$tag" = "$manifest" ] && [ "$tag" = "$crate" ]
+      - run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+      - run: cargo +1.97.1 fmt --check --manifest-path bridge/Cargo.toml
+      - run: cargo +1.97.1 clippy --all-targets --all-features --locked --manifest-path bridge/Cargo.toml -- -D warnings
+      - run: cargo +1.97.1 test --locked --manifest-path bridge/Cargo.toml
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned so a tagged release still builds identically after runner
+      # toolchains move on; bump deliberately, alongside a local build.
+      - run: rustup toolchain install 1.97.1 --profile minimal --target ${{ matrix.arch }}-unknown-linux-musl
+      - run: cargo +1.97.1 build --release --locked --target ${{ matrix.arch }}-unknown-linux-musl --manifest-path bridge/Cargo.toml
+      - run: cp bridge/target/${{ matrix.arch }}-unknown-linux-musl/release/omarchy-browser-minimap-bridge omarchy-browser-minimap-bridge-${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-browser-minimap-bridge-${{ matrix.arch }}
+          path: omarchy-browser-minimap-bridge-${{ matrix.arch }}
+          if-no-files-found: error
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: omarchy-browser-minimap-bridge-*
+          fail_on_unmatched_files: true

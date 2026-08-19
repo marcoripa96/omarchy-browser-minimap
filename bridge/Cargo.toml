@@ -1,0 +1,28 @@
+[package]
+name = "omarchy-browser-minimap-bridge"
+version = "1.1.0"
+edition = "2021"
+license = "MIT"
+description = "agent-browser -> omarchy-shell bridge for the browser minimap plugin"
+
+[lints.rust]
+future-incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "deny", priority = -2 }
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+redundant_clone = "deny"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time", "io-std", "io-util", "process", "sync", "signal", "net"] }
+tokio-tungstenite = "0.27"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde_json = "1"
+base64 = "0.22"
+inotify = { version = "0.11", features = ["stream"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"

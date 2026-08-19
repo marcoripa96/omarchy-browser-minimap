@@ -142,6 +142,14 @@ QtObject {
     var msg
     try { msg = JSON.parse(line) } catch (e) { return }
 
+    // bridge.sh and the bridge report failures as error lines — a missing
+    // binary, a failed download, an unwritable frame directory. Silently
+    // dropping them would make "the panel never appears" undiagnosable.
+    if (msg.type === "error") {
+      console.warn("minimap: bridge error: " + (msg.message || line))
+      return
+    }
+
     if (msg.type === "point") {
       if (msg.session !== root.shown) return
       pointerMoved(msg.x, msg.y)
@@ -250,19 +258,22 @@ QtObject {
 
   property Process bridge: Process {
     id: bridgeProc
-    // Off means off: the node process exits, its WebSocket connections close,
-    // and agent-browser stops encoding frames for a client that is not there.
-    // Waiting for the host to arrive avoids spawning a bridge against default
-    // settings and killing it a frame later once the real config lands.
+    // Off means off: the bridge process exits, its WebSocket connections
+    // close, and agent-browser stops encoding frames for a client that is not
+    // there. Waiting for the host to arrive avoids spawning a bridge against
+    // default settings and killing it a frame later once the real config lands.
     running: !root.bridgeRestarting && root.enabled && root.shell !== null
     stdinEnabled: true
     command: {
-      var argv = [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps)]
+      var argv = [root.pluginDir + "/bridge.sh", "--fps", String(root.fps)]
       if (root.onlySession !== "") argv.push("--session", root.onlySession)
       if (root.trackPointer) argv.push("--track")
       return argv
     }
     stdout: SplitParser { onRead: line => root.handleLine(line) }
+    // Everything the bridge says on stderr is diagnostics; relay it to the
+    // journal, where someone asking "why is there no minimap" will look.
+    stderr: SplitParser { onRead: line => console.warn("minimap: bridge: " + line) }
     onRunningChanged: {
       if (running) root.sendSelection()
       else {
