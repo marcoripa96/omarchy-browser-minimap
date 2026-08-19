@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "omarchy-browser-minimap-bridge"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "base64",
  "futures-util",

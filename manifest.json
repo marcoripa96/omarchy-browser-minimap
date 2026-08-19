@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.marcoripa96.browser-minimap",
   "name": "Browser minimap",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "Marco Ripamonti",
   "license": "MIT",
   "description": "A live view of what agent-browser is doing: the page an agent is driving, mirrored in a corner of the desktop.",
