@@ -28,8 +28,6 @@
       "fps": 4,
       "width": 360,
       "expandedWidth": 720,
-      "topMargin": 12,
-      "rightMargin": 12,
       "showCaption": true,
       "clickThrough": false,
       "monitor": "",
@@ -45,7 +43,9 @@
       "showPointer": true,
       "pointerTrailMs": 700,
       "pointerGlideMs": 380,
-      "pointerColor": "#ffc83d"
+      "pointerColor": "#ffc83d",
+      "corner": "top-right",
+      "margin": 12
     },
     "schema": [
       {
@@ -79,22 +79,6 @@
         "min": 160,
         "max": 2400,
         "defaultValue": 720
-      },
-      {
-        "key": "topMargin",
-        "type": "integer",
-        "label": "Top margin (px)",
-        "min": 0,
-        "max": 400,
-        "defaultValue": 12
-      },
-      {
-        "key": "rightMargin",
-        "type": "integer",
-        "label": "Right margin (px)",
-        "min": 0,
-        "max": 400,
-        "defaultValue": 12
       },
       {
         "key": "showCaption",
@@ -209,6 +193,27 @@
         "label": "Pointer colour",
         "defaultValue": "#ffc83d",
         "description": "Any QML colour. It sits over arbitrary web pages rather than the shell's own surfaces, so it does not follow the theme accent by default."
+      },
+      {
+        "key": "corner",
+        "type": "enum",
+        "label": "Corner",
+        "options": [
+          "top-left",
+          "top-right",
+          "bottom-left",
+          "bottom-right"
+        ],
+        "defaultValue": "top-right",
+        "description": "Which corner the panel rests in. Drag the panel and drop it to set this."
+      },
+      {
+        "key": "margin",
+        "type": "integer",
+        "label": "Gap from the corner (px)",
+        "min": 0,
+        "max": 400,
+        "defaultValue": 12
       }
     ]
   },
@@ -219,8 +224,6 @@
       "fps": 4,
       "width": 360,
       "expandedWidth": 720,
-      "topMargin": 12,
-      "rightMargin": 12,
       "showCaption": true,
       "clickThrough": false,
       "monitor": "",
@@ -236,7 +239,9 @@
       "showPointer": true,
       "pointerTrailMs": 700,
       "pointerGlideMs": 380,
-      "pointerColor": "#ffc83d"
+      "pointerColor": "#ffc83d",
+      "corner": "top-right",
+      "margin": 12
     }
   }
 }

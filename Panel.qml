@@ -38,6 +38,17 @@ Item {
   readonly property bool showCaption: setting("showCaption", true) === true
   readonly property bool clickThrough: setting("clickThrough", false) === true
   readonly property string pinnedMonitor: String(setting("monitor", ""))
+  // Which corner the card rests in. Written by dropping it there.
+  readonly property string corner: {
+    var value = String(setting("corner", "top-right"))
+    return ["top-left", "top-right", "bottom-left", "bottom-right"].indexOf(value) !== -1
+      ? value : "top-right"
+  }
+  // topMargin/rightMargin predate corners and still win if someone set them.
+  readonly property int marginX: setting("rightMargin", setting("margin", 12))
+  readonly property int marginY: setting("topMargin", setting("margin", 12))
+  readonly property bool atTop: corner.indexOf("top") === 0
+  readonly property bool atLeft: corner.indexOf("left") !== -1
   readonly property int idleHideSec: Math.max(0, setting("idleHideSec", 8))
   readonly property int maxVisibleSec: Math.max(0, setting("maxVisibleSec", 45))
   readonly property bool debug: setting("debug", false) === true
@@ -177,6 +188,22 @@ Item {
       console.log("minimap: show=" + next + " idle=" + idle + " over=" + overstayed
         + " quietFor=" + Math.round(quietFor) + " shownFor=" + Math.round(now - root.shownSince))
     root.shouldShow = next
+  }
+
+  // Where the card came to rest decides which corner it belongs to: whichever
+  // quadrant of the output its centre landed in. Quadrants rather than nearest
+  // corner by distance, because a quadrant is what a person can predict while
+  // still holding the card.
+  function settleIntoNearestCorner() {
+    if (!win.width || !win.height) return
+    var cx = card.x + card.width / 2
+    var cy = card.y + card.height / 2
+    var next = (cy < win.height / 2 ? "top" : "bottom") + "-" + (cx < win.width / 2 ? "left" : "right")
+    if (next !== root.corner && root.svc) root.svc.persist("corner", next)
+    // Restore the resting bindings the drag replaced with fixed values, so the
+    // card animates home and keeps following the corner from then on.
+    card.x = Qt.binding(function() { return card.restX })
+    card.y = Qt.binding(function() { return card.restY })
   }
 
   // A fresh action: show again, from the top of the clock.
@@ -371,22 +398,12 @@ Item {
     // screen being worked on. Pin it by setting `monitor` to an output name.
     screen: root.targetScreen
 
-    anchors { top: true; right: true }
-    margins {
-      top: Style.space(root.setting("topMargin", 12))
-      right: Style.space(root.setting("rightMargin", 12))
-    }
-    // Sized to the largest the card can get, and left there. Binding the
-    // surface to the animating card resized the Wayland surface on every
-    // frame, and Hyprland animates layer resizes itself (layersIn/layersOut),
-    // so each of those frames started its own compositor animation. The result
-    // was two animation systems fighting over one rectangle. The surface now
-    // changes size only when the geometry genuinely changes — a rail
-    // appearing, a different viewport aspect — and the expand/collapse happens
-    // entirely inside it, on the scene graph, where it is smooth.
-    implicitWidth: card.borderLeft + root.railWidth + root.expandedWidth + card.borderRight
-    implicitHeight: card.borderTop + root.headerHeight
-      + Math.round(root.expandedWidth * root.aspect) + card.borderBottom
+    // The whole output, so the card can be dragged anywhere on it. Input is
+    // masked to the card below, so the empty area passes clicks straight
+    // through. Anchoring every edge also means the bar's exclusive zone is
+    // honoured on all four sides, so a top corner sits under the bar and a
+    // bottom one above anything reserved down there.
+    anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
 
     WlrLayershell.namespace: "omarchy-browser-minimap"
@@ -399,11 +416,39 @@ Item {
 
     BorderSurface {
       id: card
-      // The panel is anchored to the top right, so the card grows down and to
-      // the left out of that corner rather than from its own centre.
-      anchors.top: parent.top
-      anchors.right: parent.right
-      transformOrigin: Item.TopRight
+      // Not anchored: the card is positioned so it can be picked up and moved.
+      // It rests against whichever corner it was last dropped nearest to, and
+      // grows out of that corner rather than from its own centre.
+      readonly property int restX: root.atLeft
+        ? Style.space(root.marginX)
+        : win.width - width - Style.space(root.marginX)
+      readonly property int restY: root.atTop
+        ? Style.space(root.marginY)
+        : win.height - height - Style.space(root.marginY)
+
+      x: restX
+      y: restY
+      transformOrigin: root.atTop
+        ? (root.atLeft ? Item.TopLeft : Item.TopRight)
+        : (root.atLeft ? Item.BottomLeft : Item.BottomRight)
+
+      // Set for the length of a drag and cleared before the card is handed
+      // back to its resting binding, so the trip home animates. Gating this on
+      // drag.active instead looked reasonable and did not work: on release the
+      // drag can still report itself active, which switched the animation off
+      // at precisely the moment it was wanted and made the card jump.
+      property bool dragging: false
+
+      // A little overshoot at the end so the card reads as landing in the
+      // corner rather than sliding to a halt near it.
+      Behavior on x {
+        enabled: !card.dragging
+        NumberAnimation { duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+      }
+      Behavior on y {
+        enabled: !card.dragging
+        NumberAnimation { duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+      }
       width: card.borderLeft + root.railWidth + root.contentWidth + card.borderRight
       height: card.borderTop + root.headerHeight + root.shotHeight + card.borderBottom
       color: Util.alpha(Color.background, 0.97)
@@ -901,14 +946,44 @@ Item {
       }
 
       MouseArea {
+        id: dragArea
         anchors.fill: parent
         // Sits under the rail: its rows take their own clicks first, and
-        // everything else toggles size or dismisses.
+        // everything else drags the card or acts on it.
         z: -1
         enabled: !root.clickThrough
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-        cursorShape: Qt.PointingHandCursor
+        cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+        drag.target: card
+        drag.axis: Drag.XAndYAxis
+        drag.minimumX: 0
+        drag.maximumX: Math.max(0, win.width - card.width)
+        drag.minimumY: 0
+        drag.maximumY: Math.max(0, win.height - card.height)
+        drag.threshold: Style.space(6)
+
+        // A drag ends in a release, and a release is also a click. Without
+        // this, letting go of the card would toggle its size every time.
+        property bool moved: false
+
+        onPressed: { moved = false; card.dragging = false }
+        onPositionChanged: {
+          if (!drag.active) return
+          moved = true
+          card.dragging = true
+        }
+
+        onReleased: {
+          if (!moved) return
+          // Cleared before the bindings are restored, so the animation is
+          // live for the journey home.
+          card.dragging = false
+          root.settleIntoNearestCorner()
+        }
+
         onClicked: (mouse) => {
+          if (moved) return
           if (mouse.button === Qt.RightButton) { root.dismissed = true; root.evaluate() }
           else if (mouse.button === Qt.MiddleButton) { if (root.svc) root.svc.cycle() }
           else if (root.svc) root.svc.toggleExpanded()

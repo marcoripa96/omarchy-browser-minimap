@@ -194,6 +194,7 @@ screencast that keeps ticking over an unchanged page does not read as activity.
 |---|---|---|
 | Bar icon | left | Turn the plugin on or off |
 | Bar icon | middle | Cycle the shown session |
+| Card | drag | Move it; on release it settles into the nearest corner |
 | Card | left | Toggle between `width` and `expandedWidth` |
 | Card | right | Dismiss this stretch of visibility |
 | Card | middle | Cycle the shown session |
@@ -253,6 +254,8 @@ back from where it was saved.
 | `rightMargin`   | 12      | Gap from the screen edge                                             |
 | `showCaption`   | true    | Page title and URL above the image                                   |
 | `clickThrough`  | false   | Purely ambient: never takes pointer input, cannot be clicked         |
+| `corner`        | top-right | Which corner it rests in; set by dragging and dropping it          |
+| `margin`        | 12      | Gap from the two edges of that corner                                |
 | `monitor`       | ""      | Output name to pin to (e.g. `HDMI-A-1`); empty follows focus         |
 | `idleHideSec`   | 8       | Hide after this long without a visual change; 0 disables rule 1      |
 | `maxVisibleSec` | 45      | Cap on one stretch of visibility; 0 disables rule 2                  |
@@ -276,19 +279,23 @@ an hour ago means nothing after a restart.
 
 Changes to `fps` and `session` restart the bridge; the rest apply live.
 
-## Why the window is bigger than the card
+## Why the window covers the whole output
 
-The layer-shell surface is sized to the largest the card can get and left
-there; the card is anchored in its top-right corner and animates inside it,
-with the input region masked to the card so the transparent margin passes
-clicks through.
+The layer-shell surface spans the output and the card is positioned inside it,
+with the input region masked to the card so everywhere else passes clicks
+straight through to whatever is underneath. That is what lets the card be
+dragged anywhere and settle into any corner, and it means the surface never
+changes size.
 
-Binding the surface to the animating card instead — the obvious way round —
-resizes the Wayland surface on every animation frame, and Hyprland animates
-layer resizes itself (`layersIn`/`layersOut`). Every frame of the QML
-animation therefore kicked off a compositor animation of its own, and the two
-fought over the same rectangle. Expanding the card now changes the surface
-geometry not at all, and the motion runs entirely on the scene graph.
+Sizing the surface to the card instead — the obvious way round — resizes the
+Wayland surface on every animation frame, and Hyprland animates layer resizes
+itself (`layersIn`/`layersOut`). Every frame of the QML animation therefore
+kicked off a compositor animation of its own, and the two fought over the same
+rectangle. Expanding, dragging and snapping now change the surface geometry not
+at all; the motion runs entirely on the scene graph.
+
+Because a layer surface belongs to one output, dragging moves the card within
+the current screen. Use `monitor` to pin it to a different one.
 
 ## Cost
 
