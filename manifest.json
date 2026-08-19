@@ -7,16 +7,23 @@
   "license": "MIT",
   "description": "A live minimap of whatever agent-browser is looking at, pinned to the top right.",
   "kinds": [
-    "panel"
+    "service",
+    "panel",
+    "bar-widget"
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "panel": "Panel.qml"
+    "service": "Service.qml",
+    "panel": "Panel.qml",
+    "barWidget": "BarWidget.qml"
   },
-  "panel": {
+  "homepage": "https://github.com/marcoripa96/omarchy-browser-minimap",
+  "barWidget": {
     "displayName": "Browser minimap",
-    "description": "Mirrors the active agent-browser session's viewport while a coding agent drives it.",
+    "description": "Toggles the agent-browser minimap and shows when a page is painting.",
     "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right",
     "defaults": {
       "fps": 4,
       "width": 360,
@@ -29,9 +36,17 @@
       "idleHideSec": 8,
       "maxVisibleSec": 45,
       "debug": false,
-      "session": ""
+      "session": "",
+      "enabled": true
     },
     "schema": [
+      {
+        "key": "enabled",
+        "type": "boolean",
+        "label": "Enabled",
+        "defaultValue": true,
+        "description": "Off stops the bridge process entirely; the bar icon toggles this."
+      },
       {
         "key": "fps",
         "type": "integer",
@@ -127,5 +142,23 @@
       }
     ]
   },
-  "homepage": "https://github.com/marcoripa96/omarchy-browser-minimap"
+  "panel": {
+    "displayName": "Browser minimap",
+    "description": "Mirrors the active agent-browser session's viewport while a coding agent drives it.",
+    "defaults": {
+      "fps": 4,
+      "width": 360,
+      "expandedWidth": 720,
+      "topMargin": 12,
+      "rightMargin": 12,
+      "showCaption": true,
+      "clickThrough": false,
+      "monitor": "",
+      "idleHideSec": 8,
+      "maxVisibleSec": 45,
+      "debug": false,
+      "session": "",
+      "enabled": true
+    }
+  }
 }

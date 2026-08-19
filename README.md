@@ -1,10 +1,20 @@
 # Browser minimap
 
-![The minimap mirroring a page an agent is driving](preview.png)
-
 A live mirror of whatever `agent-browser` is looking at, pinned under the bar on
 the focused output. It appears when a coding agent starts driving a browser and
 steps aside when it stops.
+
+![The minimap mirroring a page an agent is driving](preview.png)
+
+## Installing
+
+```bash
+omarchy plugin add https://github.com/marcoripa96/omarchy-browser-minimap.git --enable
+```
+
+That enables the panel. To get the bar switch too, add the widget to a bar
+section — `omarchy plugin enable io.github.marcoripa96.browser-minimap --section right`,
+or drag it into place.
 
 ## How it works
 
@@ -16,9 +26,10 @@ $XDG_RUNTIME_DIR/agent-browser/<session>.stream    ->  e.g. 39747
 ```
 
 `bridge.mjs` watches that directory, connects to every session it finds, and
-prints one JSON state line per change on stdout. `Minimap.qml` spawns it through
-`Process` and renders the result. Nothing polls the agent, and nothing needs the
-browser to be headed — the stream works fine against a headless Chrome.
+prints one JSON state line per change on stdout. `Service.qml` owns that process
+and all the state derived from it; `Panel.qml` renders it and `BarWidget.qml`
+switches it. Nothing polls the agent, and nothing needs the browser to be headed
+— the stream works fine against a headless Chrome.
 
 Frames arrive as base64 JPEG. The bridge writes them to
 `$XDG_RUNTIME_DIR/omarchy-browser-minimap/frame-{a,b}.jpg` rather than piping
@@ -28,42 +39,86 @@ one decodes off-screen and only becomes the front once it reports `Ready`. A
 single `Image` with `cache: false` blanks itself between loads, which reads as a
 flicker at any usable frame rate.
 
+## Several sessions at once
+
+![The session switcher with three live sessions](preview-switcher.png)
+
+Every connected session is tracked, but only one is mirrored at a time. With
+more than one live, a row of chips appears along the bottom: a filled chip is
+the one being shown, an outlined one is pinned by hand, and each chip's dot
+lights up while that session's page is painting.
+
+Unpinned, the minimap follows whichever session painted most recently — which
+in practice means a page that animates on its own wins permanently over one
+that is merely being worked on. Click a chip to pin it, click the pinned chip
+to release it, or middle-click anywhere on the card to cycle.
+
 ## When it shows and when it goes away
 
 There is no single clean "the agent is done" signal, so three rules cover it:
 
 1. **The page stopped changing.** After `idleHideSec` (default 8) with a still
    viewport, the minimap fades out. This is the common case: CDP stops sending
-   frames entirely for a static page, so a finished navigation goes quiet within
-   a second.
+   frames entirely for a static page, so a finished navigation goes quiet
+   within a second.
 2. **The page never stops changing.** Live consoles, spinners and ticking clocks
    repaint forever and would otherwise pin the minimap up permanently, so
    `maxVisibleSec` (default 45) caps a single stretch of visibility.
-3. **Something happened.** A navigation, or the first change after a quiet
-   spell, starts a new stretch and brings it straight back.
+3. **Something happened.** A navigation, a session switch, or the first change
+   after a quiet spell starts a new stretch and brings it back.
 
 Right-click dismisses the current stretch by hand; rule 3 still returns it.
-Left-click toggles between `width` and `expandedWidth`. Closing the browser
-session hides it immediately.
+Closing the browser session hides it immediately.
 
 The bridge hashes each frame payload and drops byte-identical ones, so a
 screencast that keeps ticking over an unchanged page does not read as activity.
 
+## Controls
+
+| Where | Action | What it does |
+|---|---|---|
+| Bar icon | left | Turn the plugin on or off |
+| Bar icon | middle | Cycle the shown session |
+| Card | left | Toggle between `width` and `expandedWidth` |
+| Card | right | Dismiss this stretch of visibility |
+| Card | middle | Cycle the shown session |
+| Chip | left | Pin that session, or release it if already pinned |
+
+Off is off: the bridge process exits, its WebSocket connections close, and
+`agent-browser` stops encoding frames for a client that is no longer there. A
+disabled plugin costs nothing but the bar glyph.
+
+## IPC
+
+Every control is scriptable, so it can go on a keybinding:
+
+```bash
+omarchy-shell io.github.marcoripa96.browser-minimap toggle     # on/off
+omarchy-shell io.github.marcoripa96.browser-minimap cycle      # next session, then auto
+omarchy-shell io.github.marcoripa96.browser-minimap select foo # pin a session by name
+omarchy-shell io.github.marcoripa96.browser-minimap auto       # release the pin
+omarchy-shell io.github.marcoripa96.browser-minimap status     # JSON state
+```
+
+```conf
+# hyprland.conf
+bind = SUPER, B, exec, omarchy-shell io.github.marcoripa96.browser-minimap toggle
+```
+
 ## Settings
 
-Panel plugins are not covered by the bar settings UI, so these are edited by
-hand in the plugin's entry in `~/.config/omarchy/shell.json`:
+With the widget on the bar, settings live in its bar-layout entry in
+`~/.config/omarchy/shell.json`; otherwise they live in its `plugins[]` entry.
+That is the same precedence the shell writes with, so a value is always read
+back from where it was saved.
 
 ```json
-{
-  "plugins": [
-    { "id": "io.github.marcoripa96.browser-minimap", "width": 420, "idleHideSec": 12 }
-  ]
-}
+{ "id": "io.github.marcoripa96.browser-minimap", "width": 420, "idleHideSec": 12 }
 ```
 
 | Key             | Default | What it does                                                        |
 |-----------------|---------|---------------------------------------------------------------------|
+| `enabled`       | true    | The bar icon writes this; false stops the bridge entirely            |
 | `fps`           | 4       | Frame rate cap, applied server-side by agent-browser                 |
 | `width`         | 360     | Compact width; height follows the browser viewport's aspect ratio    |
 | `expandedWidth` | 720     | Width after a left-click                                             |
@@ -74,27 +129,23 @@ hand in the plugin's entry in `~/.config/omarchy/shell.json`:
 | `monitor`       | ""      | Output name to pin to (e.g. `HDMI-A-1`); empty follows focus         |
 | `idleHideSec`   | 8       | Hide after this long without a visual change; 0 disables rule 1      |
 | `maxVisibleSec` | 45      | Cap on one stretch of visibility; 0 disables rule 2                  |
-| `session`       | ""      | agent-browser session to pin to; empty tracks whichever is painting  |
+| `session`       | ""      | Hard pin: the bridge only ever connects to this session              |
 | `debug`         | false   | Log show/hide reasoning to the `omarchy-shell` journal tag           |
 
-Changes to `fps` and `session` restart the bridge; the rest apply live.
+`session` and the chip switcher are different things. `session` is durable and
+narrows what the bridge watches at all; the chips are a runtime choice among the
+sessions it is already watching, and are deliberately not persisted — a session
+name from an hour ago means nothing after a restart.
 
-With two agents driving two browsers, the unpinned minimap follows whichever
-page painted most recently, which means a busy page wins essentially always.
-Set `session` to the name from `agent-browser session list` to pin it.
+Changes to `fps` and `session` restart the bridge; the rest apply live.
 
 ## Cost
 
 At the default 4fps a 1440x900 viewport is roughly 150KB per changed frame,
-written to tmpfs and decoded once. Raising `fps` raises both linearly, and the
-decode happens inside `omarchy-shell` — worth remembering before setting it to
-30.
-
-## Installing
-
-```bash
-omarchy plugin add https://github.com/marcoripa96/omarchy-browser-minimap.git --enable
-```
+written to tmpfs and decoded once. Only the shown session's frames are written;
+the rest are tracked for their activity dot and kept in memory in case you
+switch to them. Raising `fps` raises both linearly, and the decode happens
+inside `omarchy-shell` — worth remembering before setting it to 30.
 
 ## Requirements
 
@@ -109,20 +160,15 @@ live and `git push` publishes them. `omarchy plugin update <id>` fast-forwards
 the same checkout on other machines.
 
 ```bash
-omarchy plugin validate .                     # manifest contract
-qmllint -I "$OMARCHY_PATH/shell" Panel.qml    # QML errors before a restart
-omarchy restart shell                         # reload; NOT `refresh shell`,
-                                              # which resets shell.json to defaults
-journalctl --user -t omarchy-shell -f         # the shell's log
+omarchy plugin validate .                              # manifest contract
+qmllint -I "$OMARCHY_PATH/shell" Service.qml Panel.qml BarWidget.qml
+omarchy restart shell                                  # reload; NOT `refresh shell`,
+                                                       # which resets shell.json to defaults
+journalctl --user -t omarchy-shell -f                  # the shell's log
 ```
 
-## Debugging
+Run the bridge on its own to see exactly what the shell sees:
 
 ```bash
-# What the panel sees, live:
-~/.config/omarchy/plugins/io.github.marcoripa96.browser-minimap/bridge.sh \
-  ~/.config/omarchy/plugins/io.github.marcoripa96.browser-minimap/bridge.mjs --fps 4
-
-# Presence decisions (set "debug": true first):
-journalctl --user -t omarchy-shell -f | grep minimap:
+./bridge.sh ./bridge.mjs --fps 4
 ```

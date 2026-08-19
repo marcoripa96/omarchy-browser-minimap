@@ -6,53 +6,33 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 
-// A live mirror of whatever agent-browser is looking at, pinned under the bar
-// on the focused output. The panel owns no polling of its own: a node bridge
-// watches the agent-browser runtime directory and this file only reacts to the
-// state lines it prints.
+// The minimap surface. All state and the bridge process live in Service.qml;
+// this file is the view, plus the policy for when the view is worth showing.
 Item {
   id: root
 
   property var shell: null
   property var manifest: null
+  property var service: null
 
-  // ------------------------------------------------------------- settings
-  // Defaults ship in the manifest; overrides live in this plugin's entry in
-  // shell.json. Reading both inside pick() is what makes the bindings below
-  // re-evaluate when either side changes.
-  readonly property var defaults: manifest && manifest.panel && manifest.panel.defaults ? manifest.panel.defaults : ({})
-  readonly property var overrides: {
-    var cfg = root.shell ? root.shell.shellConfig : null
-    var list = cfg && Array.isArray(cfg.plugins) ? cfg.plugins : []
-    for (var i = 0; i < list.length; i++)
-      if (list[i] && list[i].id === "io.github.marcoripa96.browser-minimap") return list[i]
-    return ({})
-  }
-  function pick(key, fallback) {
-    if (overrides[key] !== undefined) return overrides[key]
-    if (defaults[key] !== undefined) return defaults[key]
-    return fallback
+  function setting(key, fallback) {
+    return root.service ? root.service.setting(key, fallback) : fallback
   }
 
-  readonly property int fps: Math.max(1, Math.min(30, pick("fps", 4)))
-  readonly property int compactWidth: Style.space(pick("width", 360))
-  readonly property int expandedWidth: Style.space(pick("expandedWidth", 720))
-  readonly property bool showCaption: pick("showCaption", true) === true
-  readonly property bool clickThrough: pick("clickThrough", false) === true
-  readonly property string pinnedMonitor: String(pick("monitor", ""))
-  readonly property int idleHideSec: Math.max(0, pick("idleHideSec", 8))
-  readonly property int maxVisibleSec: Math.max(0, pick("maxVisibleSec", 45))
-  readonly property bool debug: pick("debug", false) === true
-  readonly property string onlySession: String(pick("session", ""))
+  readonly property int compactWidth: Style.space(setting("width", 360))
+  readonly property int expandedWidth: Style.space(setting("expandedWidth", 720))
+  readonly property bool showCaption: setting("showCaption", true) === true
+  readonly property bool clickThrough: setting("clickThrough", false) === true
+  readonly property string pinnedMonitor: String(setting("monitor", ""))
+  readonly property int idleHideSec: Math.max(0, setting("idleHideSec", 8))
+  readonly property int maxVisibleSec: Math.max(0, setting("maxVisibleSec", 45))
+  readonly property bool debug: setting("debug", false) === true
 
-  // Qt hands a QML file its own directory as a file:// URL; the bridge needs a
-  // plain path to exec.
-  readonly property string pluginDir: {
-    var u = Qt.resolvedUrl(".").toString()
-    if (u.indexOf("file://") === 0) u = u.substring(7)
-    while (u.length > 1 && u.charAt(u.length - 1) === "/") u = u.substring(0, u.length - 1)
-    return u
-  }
+  readonly property bool live: service ? service.live : false
+  readonly property bool painting: service ? service.painting : false
+  readonly property var sessions: service && service.sessions ? service.sessions : []
+  readonly property int sessionCount: sessions.length
+  readonly property bool showSwitcher: sessionCount > 1
 
   readonly property var targetScreen: {
     var wanted = root.pinnedMonitor
@@ -67,19 +47,9 @@ Item {
   }
 
   // ---------------------------------------------------------------- state
-  property bool live: false          // a browser session exists and has a tab
-  property bool shouldShow: false    // ...and it is worth looking at right now
-  property bool present: false       // window mounted (outlives shouldShow by one fade)
+  property bool shouldShow: false
+  property bool present: false
   property bool expanded: false
-  property bool painting: false      // the page changed in the last moment
-
-  property string pageUrl: ""
-  property string pageTitle: ""
-  property int sessionCount: 0
-  property int viewportW: 1440
-  property int viewportH: 900
-
-  property double lastChangeAt: 0    // last time the page actually looked different
   property double shownSince: 0
   property bool dismissed: false
 
@@ -93,11 +63,15 @@ Item {
   property bool hasPainted: false
 
   readonly property int contentWidth: expanded ? expandedWidth : compactWidth
-  readonly property real aspect: viewportW > 0 && viewportH > 0 ? viewportH / viewportW : 0.625
+  readonly property real aspect: service && service.viewportW > 0 && service.viewportH > 0
+    ? service.viewportH / service.viewportW : 0.625
   readonly property int shotHeight: Math.round(contentWidth * aspect)
   readonly property int pad: Style.space(8)
   readonly property int headerHeight: showCaption
     ? root.pad + Style.font.caption + Style.font.bodySmall + Math.round(root.pad * 0.4) + root.pad
+    : 0
+  readonly property int switcherHeight: showSwitcher
+    ? Math.round(root.pad * 0.75) * 2 + Style.font.caption + Style.space(6)
     : 0
 
   // ------------------------------------------------------------- presence
@@ -112,47 +86,75 @@ Item {
   //   2. A page that animates forever (a chat console, a spinner, a live
   //      clock) would otherwise pin the minimap up permanently, so
   //      `maxVisibleSec` caps one stretch of visibility regardless.
-  //   3. Anything that reads as a fresh action — a navigation, or the first
-  //      change after a quiet spell — starts a new stretch and brings it back.
+  //   3. Anything that reads as a fresh action — a navigation, a session
+  //      switch, or the first change after a quiet spell — starts a new
+  //      stretch and brings it back.
   //
   // Right-click dismisses the current stretch by hand; rule 3 still returns it.
   function evaluate() {
-    var now = Date.now()
-
     if (!root.live) {
       root.shouldShow = false
       return
     }
 
-    var quietFor = root.lastChangeAt > 0 ? now - root.lastChangeAt : 0
-    var idle = root.idleHideSec > 0 && root.lastChangeAt > 0 && quietFor > root.idleHideSec * 1000
+    var now = Date.now()
+    var changeAt = root.service ? root.service.lastChangeAt : 0
+    var quietFor = changeAt > 0 ? now - changeAt : 0
+    var idle = root.idleHideSec > 0 && changeAt > 0 && quietFor > root.idleHideSec * 1000
     var overstayed = root.maxVisibleSec > 0 && root.shownSince > 0
       && (now - root.shownSince) > root.maxVisibleSec * 1000
 
-    root.painting = root.lastChangeAt > 0 && quietFor < 1500
     var next = !root.dismissed && !idle && !overstayed
     if (root.debug && next !== root.shouldShow)
       console.log("minimap: show=" + next + " idle=" + idle + " over=" + overstayed
-        + " quietFor=" + Math.round(quietFor) + " shownFor=" + Math.round(now - root.shownSince)
-        + " maxVisibleSec=" + root.maxVisibleSec + " idleHideSec=" + root.idleHideSec)
+        + " quietFor=" + Math.round(quietFor) + " shownFor=" + Math.round(now - root.shownSince))
     root.shouldShow = next
   }
 
   // A fresh action: show again, from the top of the clock.
   function beginStretch() {
-    if (root.debug) console.log("minimap: beginStretch " + root.pageUrl)
+    if (root.debug) console.log("minimap: beginStretch " + (root.service ? root.service.pageUrl : ""))
     root.dismissed = false
     root.shownSince = Date.now()
     evaluate()
   }
 
   Timer {
-    id: tick
     interval: 500
     running: root.live
     repeat: true
     onTriggered: root.evaluate()
   }
+
+  Connections {
+    target: root.service
+
+    // Every visual change the shown session makes.
+    function onFramePathChanged() {
+      var path = root.service.framePath
+      if (path === "" || path === root.framePath) return
+      var gap = root.shownSince > 0 ? Date.now() - root.lastQueuedAt : 0
+      root.framePath = path
+      root.queueFrame(path)
+      if (root.idleHideSec > 0 && root.lastQueuedAt > 0 && gap > root.idleHideSec * 1000)
+        root.beginStretch()
+      else
+        root.evaluate()
+      root.lastQueuedAt = Date.now()
+    }
+
+    function onLiveChanged() {
+      if (root.service.live) root.beginStretch()
+      else { root.shownSince = 0; root.dismissed = false; root.evaluate() }
+    }
+
+    // A navigation, or a deliberate switch to another session, is the clearest
+    // "something is happening" signal there is.
+    function onPageUrlChanged() { if (root.service.live) root.beginStretch() }
+    function onShownChanged() { if (root.service.live) root.beginStretch() }
+  }
+
+  property double lastQueuedAt: 0
 
   onShouldShowChanged: {
     if (shouldShow) { hideTimer.stop(); present = true }
@@ -210,66 +212,6 @@ Item {
     onTriggered: root.bufferSettled(root.frontIndex, false)
   }
 
-  // ------------------------------------------------------------ the bridge
-  function handleLine(line) {
-    var msg
-    try { msg = JSON.parse(line) } catch (e) { return }
-    if (msg.type !== "state") return
-
-    if (!msg.live) {
-      root.live = false
-      root.lastChangeAt = 0
-      root.shownSince = 0
-      root.dismissed = false
-      evaluate()
-      return
-    }
-
-    var wasLive = root.live
-    var navigated = msg.url !== undefined && msg.url !== "" && msg.url !== root.pageUrl
-
-    root.pageUrl = msg.url || ""
-    root.pageTitle = msg.title || ""
-    root.sessionCount = msg.sessions || 1
-    if (msg.vw > 0) root.viewportW = msg.vw
-    if (msg.vh > 0) root.viewportH = msg.vh
-    root.live = true
-
-    if (msg.frame && msg.frame !== root.framePath) {
-      // The bridge only sends a frame when the pixels actually differ, so this
-      // branch is the page changing, not merely the screencast ticking over.
-      var gap = root.lastChangeAt > 0 ? Date.now() - root.lastChangeAt : 0
-      var resumed = root.idleHideSec > 0 && gap > root.idleHideSec * 1000
-      root.lastChangeAt = Date.now()
-      root.framePath = msg.frame
-      queueFrame(msg.frame)
-      if (!wasLive || resumed) beginStretch()
-    }
-
-    if (navigated || !wasLive) beginStretch()
-    else evaluate()
-  }
-
-  Process {
-    id: bridge
-    running: true
-    command: root.onlySession === ""
-      ? [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps)]
-      : [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps),
-         "--session", root.onlySession]
-    stdout: SplitParser { onRead: line => root.handleLine(line) }
-  }
-
-  // Restarting on an fps change is cheaper than teaching the bridge a control
-  // channel it would otherwise never use.
-  onFpsChanged: restartBridge()
-  onOnlySessionChanged: restartBridge()
-  function restartBridge() {
-    if (!bridge.running) return
-    bridge.running = false
-    bridge.running = true
-  }
-
   // ------------------------------------------------------------------ view
   PanelWindow {
     id: win
@@ -280,8 +222,8 @@ Item {
 
     anchors { top: true; right: true }
     margins {
-      top: Style.space(root.pick("topMargin", 12))
-      right: Style.space(root.pick("rightMargin", 12))
+      top: Style.space(root.setting("topMargin", 12))
+      right: Style.space(root.setting("rightMargin", 12))
     }
     implicitWidth: card.width
     implicitHeight: card.height
@@ -298,7 +240,7 @@ Item {
     BorderSurface {
       id: card
       width: card.borderLeft + root.contentWidth + card.borderRight
-      height: card.borderTop + root.headerHeight + root.shotHeight + card.borderBottom
+      height: card.borderTop + root.headerHeight + root.shotHeight + root.switcherHeight + card.borderBottom
       color: Util.alpha(Color.background, 0.97)
       borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
       radius: Style.cornerRadius
@@ -344,7 +286,7 @@ Item {
 
           Text {
             width: parent.width
-            text: root.pageTitle !== "" ? root.pageTitle : "agent-browser"
+            text: root.service && root.service.pageTitle !== "" ? root.service.pageTitle : "agent-browser"
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             color: Color.popups.text
@@ -353,9 +295,7 @@ Item {
           }
           Text {
             width: parent.width
-            text: root.sessionCount > 1
-              ? root.pageUrl + "  ·  " + root.sessionCount + " sessions"
-              : root.pageUrl
+            text: root.service ? root.service.pageUrl : ""
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             color: Util.alpha(Color.popups.text, 0.55)
@@ -372,11 +312,10 @@ Item {
         anchors.top: root.showCaption ? header.bottom : parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
         anchors.leftMargin: card.borderLeft
         anchors.rightMargin: card.borderRight
-        anchors.bottomMargin: card.borderBottom
         anchors.topMargin: root.showCaption ? 0 : card.borderTop
+        height: root.shotHeight
         clip: true
 
         Rectangle {
@@ -429,13 +368,105 @@ Item {
         }
       }
 
+      // One chip per live session, only once there is a choice to make. The
+      // shown session is filled in; an outline on it means the bridge picked it
+      // automatically and will keep re-picking as sessions get busy.
+      Item {
+        id: switcher
+        visible: root.showSwitcher
+        height: root.switcherHeight
+        anchors.top: viewport.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: card.borderLeft
+        anchors.rightMargin: card.borderRight
+
+        Rectangle {
+          anchors.fill: parent
+          color: Util.alpha(Color.popups.text, 0.05)
+        }
+
+        Row {
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: root.pad
+          anchors.rightMargin: root.pad
+          spacing: Math.round(root.pad * 0.5)
+
+          Repeater {
+            // No point building chips for a switcher that is not on screen.
+            model: root.showSwitcher ? root.sessions : []
+
+            Rectangle {
+              id: chip
+              required property var modelData
+              readonly property bool isShown: root.service && modelData.name === root.service.shown
+              readonly property bool isPinned: root.service && modelData.name === root.service.selected
+
+              height: Style.font.caption + Style.space(6)
+              width: Math.min(chipLabel.implicitWidth + chipDot.width + Style.space(14),
+                              Math.round(switcher.width / Math.max(1, root.sessionCount)) - root.pad)
+              radius: Math.max(2, Style.cornerRadius)
+              color: chip.isShown ? Util.alpha(Color.accent, 0.22) : Util.alpha(Color.popups.text, 0.07)
+              border.width: chip.isPinned ? Math.max(1, Style.space(1)) : 0
+              border.color: Color.accent
+
+              Rectangle {
+                id: chipDot
+                width: Style.space(5)
+                height: width
+                radius: width / 2
+                anchors.left: parent.left
+                anchors.leftMargin: Style.space(5)
+                anchors.verticalCenter: parent.verticalCenter
+                color: chip.modelData.painting ? Color.accent : Util.alpha(Color.popups.text, 0.3)
+                Behavior on color { ColorAnimation { duration: 220 } }
+              }
+
+              Text {
+                id: chipLabel
+                anchors.left: chipDot.right
+                anchors.leftMargin: Style.space(4)
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(5)
+                anchors.verticalCenter: parent.verticalCenter
+                text: chip.modelData.name
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                color: chip.isShown ? Color.popups.text : Util.alpha(Color.popups.text, 0.6)
+                elide: Text.ElideRight
+                maximumLineCount: 1
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                enabled: !root.clickThrough
+                cursorShape: Qt.PointingHandCursor
+                // Clicking the session already pinned releases it back to
+                // automatic, so one control both pins and unpins.
+                onClicked: {
+                  if (!root.service) return
+                  if (chip.isPinned) root.service.clearSelection()
+                  else root.service.select(chip.modelData.name)
+                }
+              }
+            }
+          }
+        }
+      }
+
       MouseArea {
         anchors.fill: parent
+        // Sits under the chips: the switcher's own areas take their clicks
+        // first, and everything else toggles size or dismisses.
+        z: -1
         enabled: !root.clickThrough
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
         cursorShape: Qt.PointingHandCursor
         onClicked: (mouse) => {
           if (mouse.button === Qt.RightButton) { root.dismissed = true; root.evaluate() }
+          else if (mouse.button === Qt.MiddleButton) { if (root.service) root.service.cycle() }
           else root.expanded = !root.expanded
         }
       }
