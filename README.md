@@ -59,6 +59,42 @@ than a slice out of the mirror: the page keeps the size you asked for, the card
 grows to hold the list, and a title too long for the rail is cut with an
 ellipsis instead of wrapping or stretching the card.
 
+## What the agent is doing
+
+agent-browser broadcasts every command it runs to passive stream clients, so
+the bridge can name each action without polling anything or issuing a single
+command back into a session an agent is in the middle of driving. Actions
+appear as a short stack in the bottom right of the mirror, newest at the
+bottom, and fade after `actionTtlSec`.
+
+Most of what an agent clicks is described in words, because its locator
+commands carry the text they searched by:
+
+```
+click “More information”     find text "More information" click
+click button “Accedi”        role=button[name="Accedi"]
+type into “Search”           find label "Search" fill ...
+click submit                 find testid submit click
+click link                   find role link click
+click #login-button          a bare CSS selector has nothing human in it
+click element                a snapshot ref (@e1) means nothing to a reader
+press Enter · scroll ↓120
+```
+
+**Typed values are never shown.** `fill` and `type` carry the text being
+entered, which is where passwords and tokens go, so the feed names the field
+and stops there. Evaluated JavaScript is reported as `eval` for the same
+reason.
+
+Only raw pointer commands carry coordinates, and those get a ring drawn on the
+page at the point. Selector-driven actions — nearly everything an agent does —
+have no spatial information at all, which is why the feed names actions rather
+than trying to draw a cursor.
+
+An action also counts as activity in its own right: a click that opens a menu
+three frames later brings the panel up immediately rather than waiting for the
+page to repaint.
+
 ## When it shows and when it goes away
 
 There is no single clean "the agent is done" signal, so three rules cover it:
@@ -148,6 +184,9 @@ back from where it was saved.
 | `idleHideSec`   | 8       | Hide after this long without a visual change; 0 disables rule 1      |
 | `maxVisibleSec` | 45      | Cap on one stretch of visibility; 0 disables rule 2                  |
 | `railWidth`     | 132     | Width of the session rail, added to the card rather than the mirror  |
+| `showActions`   | true    | Name each action the agent performs, in the bottom right             |
+| `actionTtlSec`  | 4       | How long an action stays on screen                                   |
+| `maxActions`    | 4       | How many actions are stacked at once                                 |
 | `session`       | ""      | Hard pin: the bridge only ever connects to this session              |
 | `debug`         | false   | Log show/hide reasoning to the `omarchy-shell` journal tag           |
 

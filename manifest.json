@@ -38,7 +38,10 @@
       "debug": false,
       "session": "",
       "enabled": true,
-      "railWidth": 132
+      "railWidth": 132,
+      "showActions": true,
+      "actionTtlSec": 4,
+      "maxActions": 4
     },
     "schema": [
       {
@@ -149,6 +152,29 @@
         "max": 260,
         "defaultValue": 132,
         "description": "Width of the session list shown down the left of the card when more than one session is live. It is added to the card, not taken out of the mirror."
+      },
+      {
+        "key": "showActions",
+        "type": "boolean",
+        "label": "Show the action feed",
+        "defaultValue": true,
+        "description": "Names each action the agent performs in the bottom right of the mirror."
+      },
+      {
+        "key": "actionTtlSec",
+        "type": "integer",
+        "label": "Action visible for (seconds)",
+        "min": 1,
+        "max": 60,
+        "defaultValue": 4
+      },
+      {
+        "key": "maxActions",
+        "type": "integer",
+        "label": "Actions shown at once",
+        "min": 1,
+        "max": 10,
+        "defaultValue": 4
       }
     ]
   },
@@ -169,7 +195,10 @@
       "debug": false,
       "session": "",
       "enabled": true,
-      "railWidth": 132
+      "railWidth": 132,
+      "showActions": true,
+      "actionTtlSec": 4,
+      "maxActions": 4
     }
   }
 }

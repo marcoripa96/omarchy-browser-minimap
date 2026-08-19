@@ -126,9 +126,24 @@ QtObject {
     try { bridge.write(JSON.stringify({ select: root.selected }) + "\n") } catch (e) {}
   }
 
+  // One agent action. `x`/`y` are viewport pixels and only present for raw
+  // pointer commands; hasPoint says whether they mean anything.
+  signal actionOccurred(string label, real x, real y, bool hasPoint)
+
   function handleLine(line) {
     var msg
     try { msg = JSON.parse(line) } catch (e) { return }
+
+    if (msg.type === "action") {
+      // Actions from a session you are not watching would be unreadable
+      // without saying which session they came from, and the rail already
+      // shows those sessions are busy.
+      if (msg.session !== root.shown) return
+      var hasPoint = msg.x !== undefined && msg.y !== undefined
+      actionOccurred(msg.label || msg.action, hasPoint ? msg.x : 0, hasPoint ? msg.y : 0, hasPoint)
+      return
+    }
+
     if (msg.type !== "state") return
 
     var incoming = Array.isArray(msg.sessions) ? msg.sessions : []

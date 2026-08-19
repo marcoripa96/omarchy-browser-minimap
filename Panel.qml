@@ -41,6 +41,9 @@ Item {
   readonly property int idleHideSec: Math.max(0, setting("idleHideSec", 8))
   readonly property int maxVisibleSec: Math.max(0, setting("maxVisibleSec", 45))
   readonly property bool debug: setting("debug", false) === true
+  readonly property bool showActions: setting("showActions", true) === true
+  readonly property int actionTtlSec: Math.max(1, setting("actionTtlSec", 4))
+  readonly property int maxActions: Math.max(1, setting("maxActions", 4))
 
   readonly property bool live: svc ? svc.live : false
   readonly property bool painting: svc ? svc.painting : false
@@ -70,6 +73,10 @@ Item {
   // Frames are double-buffered. A single Image with cache:false blanks itself
   // while decoding the next file, which at 4fps reads as a flicker; instead the
   // back buffer loads off-screen and only becomes the front once it is Ready.
+  // Drives the age-out of the action feed. Updated by the same tick that
+  // evaluates presence rather than a timer of its own.
+  property double nowTick: 0
+
   property string framePath: ""
   property string pendingPath: ""
   property int frontIndex: 0
@@ -151,7 +158,11 @@ Item {
     // instant the session goes away.
     running: root.live || root.present
     repeat: true
-    onTriggered: root.evaluate()
+    onTriggered: {
+      root.nowTick = Date.now()
+      root.pruneActions()
+      root.evaluate()
+    }
   }
 
 
@@ -161,7 +172,18 @@ Item {
     // Every visual change the shown session makes.
     function onFramePathChanged() {
       var path = root.svc.framePath
-      if (path === "" || path === root.framePath) return
+      // Empty means the shown session has never painted: show nothing rather
+      // than leave the previous session's page under this one's title.
+      if (path === "") {
+        root.framePath = ""
+        root.pendingPath = ""
+        root.hasPainted = false
+        root.frontIndex = 0
+        bufA.source = ""
+        bufB.source = ""
+        return
+      }
+      if (path === root.framePath) return
       var gap = root.shownSince > 0 ? Date.now() - root.lastQueuedAt : 0
       root.framePath = path
       root.queueFrame(path)
@@ -175,7 +197,14 @@ Item {
     // A navigation, or a deliberate switch to another session, is the clearest
     // "something is happening" signal there is.
     function onPageUrlChanged() { if (root.svc.live) root.beginStretch() }
-    function onShownChanged() { if (root.svc.live) root.beginStretch() }
+    function onShownChanged() {
+      // No blanking here. The bridge rewrites the incoming session's picture
+      // before announcing the switch, so the mirror changes over in one step;
+      // clearing on every shown change would blink the panel every time the
+      // automatic pick moved between two busy sessions.
+      actionModel.clear()
+      if (root.svc.live) root.beginStretch()
+    }
   }
 
   property double lastQueuedAt: 0
@@ -195,9 +224,33 @@ Item {
       root.pendingPath = ""
       root.loadingFrame = false
       root.hasPainted = false
+      actionModel.clear()
       bufA.source = ""
       bufB.source = ""
     }
+  }
+
+  // ------------------------------------------------------------ action feed
+  ListModel { id: actionModel }
+
+  Connections {
+    target: root.svc
+    function onActionOccurred(label, x, y, hasPoint) {
+      if (!root.showActions) return
+      root.nowTick = Date.now()
+      actionModel.append({ label: label, born: root.nowTick })
+      while (actionModel.count > root.maxActions) actionModel.remove(0)
+      if (hasPoint) ring.strike(x, y)
+      // Acting on a page is the clearest statement that the agent is working,
+      // and it can happen before the page repaints — a click that opens a menu
+      // three frames later would otherwise miss the panel entirely.
+      root.beginStretch()
+    }
+  }
+
+  function pruneActions() {
+    var cutoff = root.nowTick - (root.actionTtlSec * 1000 + 400)
+    while (actionModel.count > 0 && actionModel.get(0).born < cutoff) actionModel.remove(0)
   }
 
   // ---------------------------------------------------------- frame queue
@@ -405,6 +458,93 @@ Item {
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           color: Util.alpha(Color.popups.text, 0.5)
+        }
+
+        // Agents drive by selector, so a real pointer position is the
+        // exception rather than the rule. When one does come through, mark it
+        // on the page itself rather than only naming it in the feed.
+        Item {
+          id: ring
+          width: Style.space(24)
+          height: width
+          visible: false
+          opacity: 0
+
+          function strike(px, py) {
+            if (!root.svc || root.svc.viewportW <= 0) return
+            var k = viewport.width / root.svc.viewportW
+            ring.x = Math.round(px * k - ring.width / 2)
+            ring.y = Math.round(py * k - ring.height / 2)
+            ring.visible = true
+            ringPulse.restart()
+          }
+
+          Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: "transparent"
+            border.width: Math.max(1, Style.space(2))
+            border.color: Color.accent
+          }
+
+          SequentialAnimation {
+            id: ringPulse
+            ParallelAnimation {
+              NumberAnimation { target: ring; property: "opacity"; from: 1; to: 0; duration: 520; easing.type: Easing.OutCubic }
+              NumberAnimation { target: ring; property: "scale"; from: 0.5; to: 1.35; duration: 520; easing.type: Easing.OutCubic }
+            }
+            ScriptAction { script: ring.visible = false }
+          }
+        }
+
+        // What the agent just did, newest at the bottom, tucked into the
+        // corner so it covers as little of the page as possible.
+        Column {
+          id: feed
+          visible: root.showActions && actionModel.count > 0
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.rightMargin: Style.space(6)
+          anchors.bottomMargin: Style.space(6)
+          width: Math.min(viewport.width - Style.space(12), Style.space(240))
+          spacing: Math.max(1, Style.space(2))
+
+          Repeater {
+            model: actionModel
+
+            Rectangle {
+              required property string label
+              required property double born
+
+              anchors.right: parent.right
+              width: Math.min(feed.width, actionLabel.implicitWidth + Style.space(14))
+              height: Style.font.caption + Style.space(9)
+              radius: Math.max(2, Style.cornerRadius)
+              color: Util.alpha(Color.background, 0.84)
+              border.width: Math.max(1, Style.space(1))
+              border.color: Util.alpha(Color.popups.text, 0.16)
+
+              // Each entry ages out on its own clock, so a burst of actions
+              // does not reset the ones already fading.
+              opacity: (root.nowTick - born) < root.actionTtlSec * 1000 ? 1 : 0
+              Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+
+              Text {
+                id: actionLabel
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: Style.space(7)
+                anchors.rightMargin: Style.space(7)
+                anchors.verticalCenter: parent.verticalCenter
+                text: parent.label
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                color: Color.popups.text
+                elide: Text.ElideRight
+                maximumLineCount: 1
+              }
+            }
+          }
         }
       }
 

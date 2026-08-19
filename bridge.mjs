@@ -61,6 +61,118 @@ function emit(obj) {
   process.stdout.write(line + "\n")
 }
 
+// Actions are events, not state: two identical ones in a row are two things
+// that happened, so they bypass the deduplication above and do not disturb it.
+function emitAction(obj) {
+  process.stdout.write(JSON.stringify(obj) + "\n")
+}
+
+const SHORT = 40
+function short(value) {
+  const text = String(value == null ? "" : value).replace(/\s+/g, " ").trim()
+  return text.length > SHORT ? text.slice(0, SHORT - 1) + "\u2026" : text
+}
+
+function quoted(value) {
+  return "\u201c" + short(value) + "\u201d"
+}
+
+// Playwright-style selector engines carry human text inside the selector
+// string itself, so a plain `click` command is often still describable
+// without asking the page anything.
+function fromSelector(selector) {
+  const text = String(selector || "")
+  let m = text.match(/^(?:text|:has-text)=["']?(.+?)["']?$/i)
+  if (m) return quoted(m[1])
+  m = text.match(/^role=([a-z]+)\[name=["']?(.+?)["']?\]$/i)
+  if (m) return m[1] + " " + quoted(m[2])
+  m = text.match(/^role=([a-z]+)$/i)
+  if (m) return m[1]
+  // A snapshot ref means nothing to a reader; the verb alone is more honest
+  // than showing "@e1".
+  if (/^@/.test(text)) return "element"
+  return short(text)
+}
+
+// What the agent aimed at, in the words a person would use. agent-browser's
+// locator commands carry the text, role or label they searched by, which is
+// most of what an agent actually clicks — bare CSS selectors and snapshot refs
+// are the cases with nothing human in them.
+function targetOf(action, p) {
+  switch (action) {
+    case "getbytext": return quoted(p.text)
+    case "getbyrole": return p.name ? short(p.role) + " " + quoted(p.name) : short(p.role)
+    case "getbylabel": return quoted(p.label)
+    case "getbyplaceholder": return quoted(p.placeholder)
+    case "getbyalt": return quoted(p.alt)
+    case "getbytitle": return quoted(p.title)
+    case "getbytestid": return short(p.testId)
+    default: return fromSelector(p.selector)
+  }
+}
+
+// fill and type carry the value being typed. It is never shown: this is where
+// passwords and tokens go, and the panel sits on a desktop.
+const VERBS = {
+  click: "click", dblclick: "double-click", hover: "hover", focus: "focus",
+  check: "check", uncheck: "uncheck", select: "select", fill: "type into",
+  type: "type into", upload: "upload to", drag: "drag", scrollintoview: "scroll to",
+}
+
+function verbFor(name, fallback) {
+  return VERBS[String(name || "").toLowerCase()] || fallback
+}
+
+// A short human label for one agent action.
+function describe(action, p) {
+  // The locator family: the verb is in `subaction`, the target in the params.
+  if (action.indexOf("getby") === 0) {
+    const verb = p.subaction ? verbFor(p.subaction, String(p.subaction)) : "find"
+    return verb + " " + targetOf(action, p)
+  }
+
+  switch (action) {
+    case "navigate": {
+      let url = String(p.url || "")
+      url = url.replace(/^https?:\/\//, "").replace(/\/$/, "")
+      return "navigate " + short(url)
+    }
+    case "click": return "click " + fromSelector(p.selector)
+    case "dblclick": return "double-click " + fromSelector(p.selector)
+    case "hover": return "hover " + fromSelector(p.selector)
+    case "focus": return "focus " + fromSelector(p.selector)
+    case "check": return "check " + fromSelector(p.selector)
+    case "uncheck": return "uncheck " + fromSelector(p.selector)
+    case "select": return "select " + fromSelector(p.selector)
+    case "scrollintoview": return "scroll to " + fromSelector(p.selector)
+    case "drag": return "drag " + fromSelector(p.selector)
+    case "upload": return "upload to " + fromSelector(p.selector)
+    // Deliberately no value: this is where credentials get typed.
+    case "type": return "type into " + fromSelector(p.selector)
+    case "fill": return "type into " + fromSelector(p.selector)
+    case "keyboard": return "type"
+    case "press": return "press " + short(p.key || "")
+    case "scroll": {
+      const arrows = { up: "\u2191", down: "\u2193", left: "\u2190", right: "\u2192" }
+      const arrow = arrows[String(p.direction || "").toLowerCase()] || ""
+      return "scroll " + arrow + (p.amount !== undefined ? String(p.amount) : "")
+    }
+    case "mousemove": return "move " + Math.round(p.x) + "," + Math.round(p.y)
+    case "mousedown": return "mouse down"
+    case "mouseup": return "mouse up"
+    case "wheel": return "wheel"
+    case "back": return "back"
+    case "forward": return "forward"
+    case "reload": return "reload"
+    case "screenshot": return "screenshot"
+    case "snapshot": return "snapshot"
+    case "eval": return "eval"          // never the code itself
+    case "waitfor":
+    case "wait": return "wait " + (p.selector ? fromSelector(p.selector) : short(p.ms || ""))
+    default: return short(action)
+  }
+}
+
 function usable(s) {
   return s.connected && s.tabCount > 0
 }
@@ -119,7 +231,11 @@ function publish() {
     return
   }
 
+  // Covers automatic switches as well as deliberate ones: whichever way the
+  // shown session changed, its picture is rewritten before it is announced.
+  if (s.name !== shownName) refreshShown(s)
   shownName = s.name
+
   emit({
     type: "state",
     live: true,
@@ -136,10 +252,16 @@ function publish() {
   })
 }
 
-// Switching sessions should show that page immediately rather than waiting for
-// it to repaint, so every session keeps its most recent frame in memory.
-function showLatestFrom(s) {
-  if (!s || !s.latest) return
+// The two frame slots are shared by every session, so a session's stored path
+// can be holding some other session's picture by the time you come back to it.
+// Whenever the shown session changes, its own last frame is written afresh —
+// that also means switching shows the page immediately instead of waiting for
+// it to repaint. A session that has never painted reports no frame at all,
+// which is the one case where the panel should go blank rather than keep
+// showing what was there before.
+function refreshShown(s) {
+  if (!s) return
+  if (!s.latest) { s.frame = ""; return }
   try {
     s.frame = writeFrame(s.latest)
     s.seq = (s.seq || 0) + 1
@@ -150,8 +272,8 @@ function select(name) {
   const next = typeof name === "string" ? name : ""
   if (next === selected) return
   selected = next
-  const s = shownSession()
-  if (s && s.name !== shownName) showLatestFrom(s)
+  // publish() refreshes the frame whenever the shown session changes, so a
+  // manual switch needs nothing extra here.
   publish()
 }
 
@@ -193,6 +315,27 @@ function connect(name, port) {
       s.url = active ? active.url || "" : ""
       s.title = active ? active.title || "" : ""
       publish()
+      return
+    }
+
+    // agent-browser broadcasts every command it runs to passive stream
+    // clients, so the feed costs nothing but parsing: no polling, no commands
+    // issued back into a session an agent is in the middle of driving.
+    if (msg.type === "command" && msg.action) {
+      const p = msg.params || {}
+      const event = {
+        type: "action",
+        session: name,
+        action: msg.action,
+        label: describe(msg.action, p),
+      }
+      // Only raw pointer commands carry coordinates; selector-driven ones,
+      // which is most of what an agent does, have no spatial information.
+      if (typeof p.x === "number" && typeof p.y === "number") {
+        event.x = p.x
+        event.y = p.y
+      }
+      emitAction(event)
       return
     }
 
