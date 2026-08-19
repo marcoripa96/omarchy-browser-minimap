@@ -5,5 +5,5 @@
 #
 # These are produced by the release workflow, not by a local build: see
 # "Releasing" in README.md. Regenerate them for every version bump.
-e74a907f2460b02131905f32020a5205772791df011da880836856e683234f18  omarchy-browser-minimap-bridge-x86_64
-e66baacc84ca56a3064b2e6f5505be16161118ec00fc32005f59e379dce7b402  omarchy-browser-minimap-bridge-aarch64
+71473ad6c7ee8eed1dd61bc81b793778add61ec1fd81aa3aa395a7611749fc70  omarchy-browser-minimap-bridge-x86_64
+369d8bea06782ee5c8b6d5ab85a3caddc91d6ff027f9d1e4672b3a64282019eb  omarchy-browser-minimap-bridge-aarch64
