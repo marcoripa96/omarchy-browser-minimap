@@ -41,7 +41,11 @@
       "railWidth": 132,
       "showActions": true,
       "actionTtlSec": 4,
-      "maxActions": 4
+      "maxActions": 4,
+      "showPointer": true,
+      "pointerTrailMs": 700,
+      "pointerGlideMs": 380,
+      "pointerColor": "#ffc83d"
     },
     "schema": [
       {
@@ -175,6 +179,36 @@
         "min": 1,
         "max": 10,
         "defaultValue": 4
+      },
+      {
+        "key": "showPointer",
+        "type": "boolean",
+        "label": "Show the agent's pointer",
+        "defaultValue": true,
+        "description": "Draws a marker and fading trail where the agent acts. Resolving a target's position costs one read-only query per action into that session; off, the bridge never issues a command of any kind."
+      },
+      {
+        "key": "pointerTrailMs",
+        "type": "integer",
+        "label": "Trail length (ms)",
+        "min": 120,
+        "max": 4000,
+        "defaultValue": 700
+      },
+      {
+        "key": "pointerGlideMs",
+        "type": "integer",
+        "label": "Glide between points (ms)",
+        "min": 0,
+        "max": 2000,
+        "defaultValue": 380
+      },
+      {
+        "key": "pointerColor",
+        "type": "string",
+        "label": "Pointer colour",
+        "defaultValue": "#ffc83d",
+        "description": "Any QML colour. It sits over arbitrary web pages rather than the shell's own surfaces, so it does not follow the theme accent by default."
       }
     ]
   },
@@ -198,7 +232,11 @@
       "railWidth": 132,
       "showActions": true,
       "actionTtlSec": 4,
-      "maxActions": 4
+      "maxActions": 4,
+      "showPointer": true,
+      "pointerTrailMs": 700,
+      "pointerGlideMs": 380,
+      "pointerColor": "#ffc83d"
     }
   }
 }

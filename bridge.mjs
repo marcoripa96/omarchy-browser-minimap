@@ -16,6 +16,7 @@
 // file + rename means the panel can never catch a half-written frame.
 
 import crypto from "node:crypto"
+import { execFile } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import readline from "node:readline"
@@ -35,6 +36,20 @@ const MAX_FPS = clamp(int(flag("--fps"), 4), 1, 30)
 // A hard pin: the bridge never even connects to anything else. Distinct from
 // the soft `select` below, which chooses among the sessions it is watching.
 const ONLY_SESSION = flag("--session", "")
+// Resolving where a click landed costs one read-only query per action. Off,
+// the bridge never issues a command of any kind into a session.
+const TRACK_POINTER = args.indexOf("--track") !== -1
+
+// agent-browser is not necessarily on the PATH the shell inherited.
+const CLI = (() => {
+  const candidates = [
+    `${process.env.HOME}/.local/share/mise/shims/agent-browser`,
+    "/usr/local/bin/agent-browser",
+    "/usr/bin/agent-browser",
+  ]
+  for (const c of candidates) { try { fs.accessSync(c, fs.constants.X_OK); return c } catch {} }
+  return "agent-browser"
+})()
 // fs.watch on tmpfs is reliable, but a rescan costs one readdir and removes a
 // whole class of "the panel never woke up" bug reports.
 const RESCAN_MS = 2000
@@ -80,7 +95,7 @@ function quoted(value) {
 // Playwright-style selector engines carry human text inside the selector
 // string itself, so a plain `click` command is often still describable
 // without asking the page anything.
-function fromSelector(selector) {
+function fromSelector(selector, refs) {
   const text = String(selector || "")
   let m = text.match(/^(?:text|:has-text)=["']?(.+?)["']?$/i)
   if (m) return quoted(m[1])
@@ -88,9 +103,15 @@ function fromSelector(selector) {
   if (m) return m[1] + " " + quoted(m[2])
   m = text.match(/^role=([a-z]+)$/i)
   if (m) return m[1]
-  // A snapshot ref means nothing to a reader; the verb alone is more honest
-  // than showing "@e1".
-  if (/^@/.test(text)) return "element"
+  // A snapshot ref means nothing to a reader on its own, but the snapshot that
+  // minted it said what it was.
+  const ref = text.match(/^@(.+)$/)
+  if (ref) {
+    const known = refs && refs[ref[1]]
+    if (known && known.name) return (known.role ? short(known.role) + " " : "") + quoted(known.name)
+    if (known && known.role) return short(known.role)
+    return "element"
+  }
   return short(text)
 }
 
@@ -98,7 +119,7 @@ function fromSelector(selector) {
 // locator commands carry the text, role or label they searched by, which is
 // most of what an agent actually clicks — bare CSS selectors and snapshot refs
 // are the cases with nothing human in them.
-function targetOf(action, p) {
+function targetOf(action, p, refs) {
   switch (action) {
     case "getbytext": return quoted(p.text)
     case "getbyrole": return p.name ? short(p.role) + " " + quoted(p.name) : short(p.role)
@@ -107,12 +128,15 @@ function targetOf(action, p) {
     case "getbyalt": return quoted(p.alt)
     case "getbytitle": return quoted(p.title)
     case "getbytestid": return short(p.testId)
-    default: return fromSelector(p.selector)
+    default: return fromSelector(p.selector, refs)
   }
 }
 
 // fill and type carry the value being typed. It is never shown: this is where
 // passwords and tokens go, and the panel sits on a desktop.
+// Actions worth drawing a pointer for: things done *at* a place on the page.
+const POINTED = new Set(["click", "dblclick", "hover", "drag", "check", "uncheck", "focus", "select", "fill", "type"])
+
 const VERBS = {
   click: "click", dblclick: "double-click", hover: "hover", focus: "focus",
   check: "check", uncheck: "uncheck", select: "select", fill: "type into",
@@ -124,11 +148,11 @@ function verbFor(name, fallback) {
 }
 
 // A short human label for one agent action.
-function describe(action, p) {
+function describe(action, p, refs) {
   // The locator family: the verb is in `subaction`, the target in the params.
   if (action.indexOf("getby") === 0) {
     const verb = p.subaction ? verbFor(p.subaction, String(p.subaction)) : "find"
-    return verb + " " + targetOf(action, p)
+    return verb + " " + targetOf(action, p, refs)
   }
 
   switch (action) {
@@ -137,19 +161,19 @@ function describe(action, p) {
       url = url.replace(/^https?:\/\//, "").replace(/\/$/, "")
       return "navigate " + short(url)
     }
-    case "click": return "click " + fromSelector(p.selector)
-    case "dblclick": return "double-click " + fromSelector(p.selector)
-    case "hover": return "hover " + fromSelector(p.selector)
-    case "focus": return "focus " + fromSelector(p.selector)
-    case "check": return "check " + fromSelector(p.selector)
-    case "uncheck": return "uncheck " + fromSelector(p.selector)
-    case "select": return "select " + fromSelector(p.selector)
-    case "scrollintoview": return "scroll to " + fromSelector(p.selector)
-    case "drag": return "drag " + fromSelector(p.selector)
-    case "upload": return "upload to " + fromSelector(p.selector)
+    case "click": return "click " + fromSelector(p.selector, refs)
+    case "dblclick": return "double-click " + fromSelector(p.selector, refs)
+    case "hover": return "hover " + fromSelector(p.selector, refs)
+    case "focus": return "focus " + fromSelector(p.selector, refs)
+    case "check": return "check " + fromSelector(p.selector, refs)
+    case "uncheck": return "uncheck " + fromSelector(p.selector, refs)
+    case "select": return "select " + fromSelector(p.selector, refs)
+    case "scrollintoview": return "scroll to " + fromSelector(p.selector, refs)
+    case "drag": return "drag " + fromSelector(p.selector, refs)
+    case "upload": return "upload to " + fromSelector(p.selector, refs)
     // Deliberately no value: this is where credentials get typed.
-    case "type": return "type into " + fromSelector(p.selector)
-    case "fill": return "type into " + fromSelector(p.selector)
+    case "type": return "type into " + fromSelector(p.selector, refs)
+    case "fill": return "type into " + fromSelector(p.selector, refs)
     case "keyboard": return "type"
     case "press": return "press " + short(p.key || "")
     case "scroll": {
@@ -168,7 +192,7 @@ function describe(action, p) {
     case "snapshot": return "snapshot"
     case "eval": return "eval"          // never the code itself
     case "waitfor":
-    case "wait": return "wait " + (p.selector ? fromSelector(p.selector) : short(p.ms || ""))
+    case "wait": return "wait " + (p.selector ? fromSelector(p.selector, refs) : short(p.ms || ""))
     default: return short(action)
   }
 }
@@ -277,6 +301,41 @@ function select(name) {
   publish()
 }
 
+// Only refs and plain CSS can be resolved this way. Playwright's text= and
+// role= engines are not accepted by `get box`, and the getby* locator commands
+// carry no selector at all, so those actions are named in the feed but never
+// drawn.
+function resolvable(selector) {
+  const text = String(selector || "")
+  if (text === "") return false
+  if (text.charAt(0) === "@") return true
+  return text.indexOf("=") === -1
+}
+
+// One query in flight per session: an agent working quickly should not spawn a
+// process per action faster than they can complete.
+function locate(s, selector) {
+  if (!TRACK_POINTER || s.locating || !resolvable(selector)) return
+  s.locating = true
+  execFile(CLI, ["get", "box", selector, "--json"],
+    { env: { ...process.env, AGENT_BROWSER_SESSION: s.name }, timeout: 2000 },
+    (err, stdout) => {
+      s.locating = false
+      if (err) return
+      let parsed
+      try { parsed = JSON.parse(stdout) } catch { return }
+      const box = parsed && parsed.success && parsed.data
+      if (!box || typeof box.x !== "number" || typeof box.y !== "number") return
+      // The centre of the element is where a click is aimed.
+      emitAction({
+        type: "point",
+        session: s.name,
+        x: box.x + (box.width || 0) / 2,
+        y: box.y + (box.height || 0) / 2,
+      })
+    })
+}
+
 function connect(name, port) {
   const existing = sessions.get(name)
   if (existing && existing.port === port) return
@@ -285,7 +344,7 @@ function connect(name, port) {
   const s = {
     name, port, connected: false, tabCount: 0,
     url: "", title: "", frame: "", latest: "", seq: 0, vw: 0, vh: 0,
-    lastChangeAt: 0, frameHash: "", ws: null, retry: null,
+    lastChangeAt: 0, frameHash: "", refs: {}, locating: false, ws: null, retry: null,
   }
   sessions.set(name, s)
 
@@ -308,6 +367,16 @@ function connect(name, port) {
       return
     }
 
+    // An agent works by taking a snapshot and then clicking the refs it
+    // returned. The snapshot's result carries the whole ref table — name and
+    // role for each — and it is broadcast to us too, so "click @e5" can be
+    // reported as the thing it actually clicked rather than as "@e5".
+    if (msg.type === "result" && msg.action === "snapshot"
+        && msg.data && msg.data.refs && typeof msg.data.refs === "object") {
+      s.refs = msg.data.refs
+      return
+    }
+
     if (msg.type === "tabs") {
       const tabs = Array.isArray(msg.tabs) ? msg.tabs : []
       s.tabCount = tabs.length
@@ -323,11 +392,14 @@ function connect(name, port) {
     // issued back into a session an agent is in the middle of driving.
     if (msg.type === "command" && msg.action) {
       const p = msg.params || {}
+      // Our own box queries come back round the stream; they are plumbing, not
+      // something the agent did.
+      if (msg.action === "boundingbox") return
       const event = {
         type: "action",
         session: name,
         action: msg.action,
-        label: describe(msg.action, p),
+        label: describe(msg.action, p, s.refs),
       }
       // Only raw pointer commands carry coordinates; selector-driven ones,
       // which is most of what an agent does, have no spatial information.
@@ -336,6 +408,12 @@ function connect(name, port) {
         event.y = p.y
       }
       emitAction(event)
+
+      if (typeof p.x === "number" && typeof p.y === "number") {
+        emitAction({ type: "point", session: name, x: p.x, y: p.y })
+      } else if (POINTED.has(msg.action)) {
+        locate(s, p.selector)
+      }
       return
     }
 

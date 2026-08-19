@@ -83,7 +83,8 @@ type into “Search”           find label "Search" fill ...
 click submit                 find testid submit click
 click link                   find role link click
 click #login-button          a bare CSS selector has nothing human in it
-click element                a snapshot ref (@e1) means nothing to a reader
+hover link “The ISO”         a snapshot ref, named from the snapshot's ref table
+click element                a ref from before the bridge saw any snapshot
 press Enter · scroll ↓120
 ```
 
@@ -97,10 +98,37 @@ entered, which is where passwords and tokens go, so the feed names the field
 and stops there. Evaluated JavaScript is reported as `eval` for the same
 reason.
 
-Only raw pointer commands carry coordinates, and those get a ring drawn on the
-page at the point. Selector-driven actions — nearly everything an agent does —
-have no spatial information at all, which is why the feed names actions rather
-than trying to draw a cursor.
+## Where the agent is working
+
+A marker glides to each place the agent acts, leaving a trail that fades behind
+it. The endpoints are real; the movement between them is not. agent-browser
+reports *what* an action targeted, never a path taken to it — there is no
+cursor to observe, because synthetic input has no travel. So the marker is told
+where to be next and animates there, which is the honest way to show a sequence
+of positions.
+
+Positions come from three places, in descending order of directness:
+
+- raw `mouse move` and `mousedown` carry `x`/`y` outright;
+- a snapshot ref (`@e5`) or a plain CSS selector is resolved to its box with one
+  read-only `get box` query;
+- Playwright's `text=` and `role=` engines, and the `getby*` locator commands,
+  cannot be resolved at all — those actions are named in the feed but not drawn.
+
+Refs are the common case, since agents work by taking a snapshot and clicking
+what it returned, and the daemon keeps a session's refs so a separate query can
+resolve them.
+
+The marker does not follow the theme accent. It sits on top of arbitrary web
+pages rather than on the shell's own surfaces, so it wants a colour that stays
+legible over a white page and a dark one alike and that a site is unlikely to
+be using for its own chrome.
+
+**This is the one feature that issues commands into a session an agent is
+driving.** They are read-only box queries, one per action, at most one in
+flight per session, and they are filtered back out of the feed so the plugin
+never reports its own plumbing as agent activity. Set `showPointer` to false
+and the bridge goes back to issuing nothing at all.
 
 A screenshot gets the shutter: the frames themselves look identical before and
 after, so without it the one action that takes something away with it would
@@ -202,6 +230,10 @@ back from where it was saved.
 | `showActions`   | true    | Name each action the agent performs, in the bottom right             |
 | `actionTtlSec`  | 4       | How long an action stays on screen                                   |
 | `maxActions`    | 4       | How many actions are stacked at once                                 |
+| `showPointer`   | true    | Marker and trail where the agent acts; off stops all box queries      |
+| `pointerTrailMs`| 700     | How long the trail takes to fade                                     |
+| `pointerGlideMs`| 380     | How long the marker takes to travel between two points               |
+| `pointerColor`  | #ffc83d | Any QML colour; amber by default rather than the theme accent         |
 | `session`       | ""      | Hard pin: the bridge only ever connects to this session              |
 | `debug`         | false   | Log show/hide reasoning to the `omarchy-shell` journal tag           |
 

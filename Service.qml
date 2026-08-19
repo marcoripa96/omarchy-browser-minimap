@@ -65,6 +65,7 @@ QtObject {
   readonly property bool enabled: setting("enabled", true) === true
   readonly property int fps: Math.max(1, Math.min(30, setting("fps", 4)))
   readonly property string onlySession: String(setting("session", ""))
+  readonly property bool trackPointer: setting("showPointer", true) === true
 
   function setEnabled(value) { persist("enabled", value === true) }
   function toggle() { setEnabled(!root.enabled) }
@@ -132,9 +133,20 @@ QtObject {
   // whether they mean anything.
   signal actionOccurred(string action, string label, real x, real y, bool hasPoint)
 
+  // Where on the page the agent just acted, in viewport pixels. Raw pointer
+  // commands carry this; for everything else the bridge resolves the target's
+  // box, when it can.
+  signal pointerMoved(real x, real y)
+
   function handleLine(line) {
     var msg
     try { msg = JSON.parse(line) } catch (e) { return }
+
+    if (msg.type === "point") {
+      if (msg.session !== root.shown) return
+      pointerMoved(msg.x, msg.y)
+      return
+    }
 
     if (msg.type === "action") {
       // Actions from a session you are not watching would be unreadable
@@ -238,10 +250,12 @@ QtObject {
     // settings and killing it a frame later once the real config lands.
     running: root.enabled && root.shell !== null
     stdinEnabled: true
-    command: root.onlySession === ""
-      ? [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps)]
-      : [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps),
-         "--session", root.onlySession]
+    command: {
+      var argv = [root.pluginDir + "/bridge.sh", root.pluginDir + "/bridge.mjs", "--fps", String(root.fps)]
+      if (root.onlySession !== "") argv.push("--session", root.onlySession)
+      if (root.trackPointer) argv.push("--track")
+      return argv
+    }
     stdout: SplitParser { onRead: line => root.handleLine(line) }
     onRunningChanged: {
       if (running) root.sendSelection()
@@ -261,6 +275,7 @@ QtObject {
   // control channel for values it reads once at startup.
   onFpsChanged: restartBridge()
   onOnlySessionChanged: restartBridge()
+  onTrackPointerChanged: restartBridge()
   function restartBridge() {
     if (!bridge.running) return
     bridge.running = false

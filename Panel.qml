@@ -44,6 +44,14 @@ Item {
   readonly property bool showActions: setting("showActions", true) === true
   readonly property int actionTtlSec: Math.max(1, setting("actionTtlSec", 4))
   readonly property int maxActions: Math.max(1, setting("maxActions", 4))
+  readonly property bool showPointer: setting("showPointer", true) === true
+  readonly property int trailMs: Math.max(120, setting("pointerTrailMs", 700))
+  readonly property int glideMs: Math.max(0, setting("pointerGlideMs", 380))
+  // Deliberately not the theme accent. The marker sits on top of arbitrary web
+  // pages rather than on the shell's own surfaces, so it wants a colour that
+  // stays legible over a white page and a dark one alike, and that no site is
+  // likely to be using for its own chrome.
+  readonly property color pointerColor: setting("pointerColor", "#ffc83d")
 
   // The host and the route are two different questions — which site is this,
   // and where in it — so they get separate places rather than one long string
@@ -272,6 +280,11 @@ Item {
 
   Connections {
     target: root.svc
+
+    function onPointerMoved(x, y) {
+      if (root.showPointer) pointerLayer.moveTo(x, y)
+    }
+
     function onActionOccurred(action, label, x, y, hasPoint) {
       // The shutter fires whether or not the feed is switched on: it is the
       // one action with a natural visual, and it says the agent took something
@@ -281,7 +294,6 @@ Item {
       root.nowTick = Date.now()
       actionModel.append({ label: label, born: root.nowTick })
       while (actionModel.count > root.maxActions) actionModel.remove(0)
-      if (hasPoint) ring.strike(x, y)
       // Acting on a page is the clearest statement that the agent is working,
       // and it can happen before the page repaints — a click that opens a menu
       // three frames later would otherwise miss the panel entirely.
@@ -295,6 +307,27 @@ Item {
   }
 
   // ---------------------------------------------------------- frame queue
+
+  // Adopt whatever the service is already holding. The handlers below only
+  // fire on change, so a panel that attaches after the frame arrived — on a
+  // hot reload, or when the service outlives a panel reload — would otherwise
+  // sit on "waiting for a frame" until the page next repainted, which for a
+  // static page is never. The same applies when the panel comes back after
+  // hiding, since hiding drops the decoded buffers.
+  function syncFromService() {
+    if (!root.svc) return
+    var path = root.svc.framePath
+    if (path !== "" && path !== root.framePath) {
+      root.framePath = path
+      queueFrame(path)
+    }
+    evaluate()
+  }
+
+  onSvcChanged: syncFromService()
+  onPresentChanged: if (present) syncFromService()
+  Component.onCompleted: syncFromService()
+
   function queueFrame(pathname) {
     if (pathname === "") return
     if (root.loadingFrame) { root.pendingPath = pathname; return }
@@ -566,40 +599,142 @@ Item {
           }
         }
 
-        // Agents drive by selector, so a real pointer position is the
-        // exception rather than the rule. When one does come through, mark it
-        // on the page itself rather than only naming it in the feed.
+        // Where the agent is working. agent-browser reports the target of an
+        // action, not a path to it, so the movement between two points is
+        // drawn rather than observed: the marker is simply told where to be
+        // next and glides there, and the trail is where it has just been. What
+        // is real is the endpoints; the line between them is an animation.
         Item {
-          id: ring
-          width: Style.space(24)
-          height: width
-          visible: false
-          opacity: 0
+          id: pointerLayer
+          anchors.fill: parent
+          visible: root.showPointer
 
-          function strike(px, py) {
-            if (!root.svc || root.svc.viewportW <= 0) return
-            var k = viewport.width / root.svc.viewportW
-            ring.x = Math.round(px * k - ring.width / 2)
-            ring.y = Math.round(py * k - ring.height / 2)
-            ring.visible = true
-            ringPulse.restart()
-          }
+          readonly property real scaleToView: root.svc && root.svc.viewportW > 0
+            ? viewport.width / root.svc.viewportW : 1
 
-          Rectangle {
-            anchors.fill: parent
-            radius: width / 2
-            color: "transparent"
-            border.width: Math.max(1, Style.space(2))
-            border.color: Color.accent
-          }
-
-          SequentialAnimation {
-            id: ringPulse
-            ParallelAnimation {
-              NumberAnimation { target: ring; property: "opacity"; from: 1; to: 0; duration: 520; easing.type: Easing.OutCubic }
-              NumberAnimation { target: ring; property: "scale"; from: 0.5; to: 1.35; duration: 520; easing.type: Easing.OutCubic }
+          function moveTo(pageX, pageY) {
+            var cx = pageX * pointerLayer.scaleToView
+            var cy = pageY * pointerLayer.scaleToView
+            // The first point of a burst appears where it happened instead of
+            // flying in from wherever the marker was left last time.
+            if (!marker.visible) {
+              marker.gliding = false
+              trail.points = []
             }
-            ScriptAction { script: ring.visible = false }
+            marker.x = cx - marker.width / 2
+            marker.y = cy - marker.height / 2
+            marker.visible = true
+            marker.gliding = true
+            pointerIdle.restart()
+            sampler.start()
+          }
+
+          Canvas {
+            id: trail
+            anchors.fill: parent
+            property var points: []
+
+            onPaint: {
+              var ctx = getContext("2d")
+              ctx.reset()
+              if (points.length < 2) return
+              var now = Date.now()
+              ctx.lineCap = "round"
+              ctx.lineJoin = "round"
+              for (var i = 1; i < points.length; i++) {
+                var age = now - points[i].t
+                var life = 1 - age / root.trailMs
+                if (life <= 0) continue
+                ctx.beginPath()
+                ctx.moveTo(points[i - 1].x, points[i - 1].y)
+                ctx.lineTo(points[i].x, points[i].y)
+                ctx.lineWidth = Math.max(1, Style.space(3) * life)
+                ctx.strokeStyle = Qt.rgba(root.pointerColor.r, root.pointerColor.g,
+                                          root.pointerColor.b, life * 0.85)
+                ctx.stroke()
+              }
+            }
+          }
+
+          Item {
+            id: marker
+            width: Style.space(13)
+            height: width
+            visible: false
+            // Turned off for the first point of a burst so the marker appears
+            // rather than travels.
+            property bool gliding: true
+
+            Behavior on x {
+              enabled: marker.gliding
+              NumberAnimation { duration: root.glideMs; easing.type: Easing.InOutCubic }
+            }
+            Behavior on y {
+              enabled: marker.gliding
+              NumberAnimation {
+                duration: root.glideMs
+                easing.type: Easing.InOutCubic
+                onFinished: pulse.restart()
+              }
+            }
+
+            Rectangle {
+              anchors.fill: parent
+              radius: width / 2
+              color: Util.alpha(root.pointerColor, 0.28)
+              border.width: Math.max(1, Style.space(2))
+              border.color: root.pointerColor
+            }
+
+            // Lands on the target the way a click would.
+            SequentialAnimation {
+              id: pulse
+              ParallelAnimation {
+                NumberAnimation { target: halo; property: "opacity"; from: 0.9; to: 0; duration: 480; easing.type: Easing.OutCubic }
+                NumberAnimation { target: halo; property: "scale"; from: 0.7; to: 2.1; duration: 480; easing.type: Easing.OutCubic }
+              }
+            }
+
+            Rectangle {
+              id: halo
+              anchors.centerIn: parent
+              width: parent.width
+              height: parent.height
+              radius: width / 2
+              color: "transparent"
+              border.width: Math.max(1, Style.space(2))
+              border.color: root.pointerColor
+              opacity: 0
+            }
+          }
+
+          // Samples the marker while it travels, so the trail follows the
+          // animation rather than jumping between the two endpoints.
+          Timer {
+            id: sampler
+            interval: 24
+            repeat: true
+            running: false
+            onTriggered: {
+              var now = Date.now()
+              if (marker.visible) {
+                trail.points.push({
+                  x: marker.x + marker.width / 2,
+                  y: marker.y + marker.height / 2,
+                  t: now,
+                })
+              }
+              while (trail.points.length > 0 && now - trail.points[0].t > root.trailMs)
+                trail.points.shift()
+              trail.requestPaint()
+              if (trail.points.length === 0 && !marker.visible) sampler.stop()
+            }
+          }
+
+          Timer {
+            id: pointerIdle
+            interval: 2600
+            onTriggered: marker.visible = false
           }
         }
 
