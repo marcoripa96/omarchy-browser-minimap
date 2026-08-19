@@ -81,6 +81,11 @@ click element                a snapshot ref (@e1) means nothing to a reader
 press Enter · scroll ↓120
 ```
 
+The dot beside the page title is a recording light: red and slowly breathing
+while the page is changing, dark and still when it is not. The session rail
+carries the same light per session, without the breathing — three pulsing dots
+in one small panel is noise, not information.
+
 **Typed values are never shown.** `fill` and `type` carry the text being
 entered, which is where passwords and tokens go, so the feed names the field
 and stops there. Evaluated JavaScript is reported as `eval` for the same
@@ -90,6 +95,10 @@ Only raw pointer commands carry coordinates, and those get a ring drawn on the
 page at the point. Selector-driven actions — nearly everything an agent does —
 have no spatial information at all, which is why the feed names actions rather
 than trying to draw a cursor.
+
+A screenshot gets the shutter: the frames themselves look identical before and
+after, so without it the one action that takes something away with it would
+pass unmarked. `pdf` fires the same flash.
 
 An action also counts as activity in its own right: a click that opens a menu
 three frames later brings the panel up immediately rather than waiting for the

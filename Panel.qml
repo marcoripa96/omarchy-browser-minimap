@@ -235,7 +235,11 @@ Item {
 
   Connections {
     target: root.svc
-    function onActionOccurred(label, x, y, hasPoint) {
+    function onActionOccurred(action, label, x, y, hasPoint) {
+      // The shutter fires whether or not the feed is switched on: it is the
+      // one action with a natural visual, and it says the agent took something
+      // away with it.
+      if (action === "screenshot" || action === "pdf") shutter.fire()
       if (!root.showActions) return
       root.nowTick = Date.now()
       actionModel.append({ label: label, born: root.nowTick })
@@ -357,18 +361,35 @@ Item {
         anchors.leftMargin: card.borderLeft + root.railWidth
         anchors.rightMargin: card.borderRight
 
+        // A recording light: red and breathing while the page is changing,
+        // dark and still when it is not.
         Rectangle {
           id: dot
-          width: Style.space(7)
+          width: Style.space(8)
           height: width
           radius: width / 2
           x: root.pad
-          y: root.pad + Math.round((Style.font.caption - height) / 2)
-          color: root.painting ? Color.accent : Util.alpha(Color.popups.text, 0.35)
+          // Centred on the title's rendered line box, not on the font's pixel
+          // size — a line box is taller than its glyphs, so measuring against
+          // pixelSize parks the light above the text it belongs to. Anchors
+          // cannot reach across into the Column, but a binding can.
+          y: headerText.y + Math.round((titleLine.height - height) / 2)
+          color: root.painting ? Color.urgent : Util.alpha(Color.popups.text, 0.3)
           Behavior on color { ColorAnimation { duration: 220 } }
+
+          SequentialAnimation {
+            running: root.painting
+            loops: Animation.Infinite
+            NumberAnimation { target: dot; property: "opacity"; to: 0.35; duration: 850; easing.type: Easing.InOutSine }
+            NumberAnimation { target: dot; property: "opacity"; to: 1.0; duration: 850; easing.type: Easing.InOutSine }
+            // The animation owns opacity while it runs, so hand it back rather
+            // than leaving the light stuck at whatever point it stopped on.
+            onStopped: dot.opacity = 1
+          }
         }
 
         Column {
+          id: headerText
           anchors.left: dot.right
           anchors.leftMargin: root.pad
           anchors.right: parent.right
@@ -378,6 +399,7 @@ Item {
           spacing: Math.round(root.pad * 0.4)
 
           Text {
+            id: titleLine
             width: parent.width
             text: root.svc && root.svc.pageTitle !== "" ? root.svc.pageTitle : "agent-browser"
             font.family: Style.font.family
@@ -458,6 +480,27 @@ Item {
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           color: Util.alpha(Color.popups.text, 0.5)
+        }
+
+        // A screenshot leaves no trace in the frames themselves — the page
+        // looks identical before and after — so it gets the one visual the
+        // action deserves.
+        Rectangle {
+          id: shutter
+          anchors.fill: parent
+          color: "white"
+          opacity: 0
+          visible: opacity > 0
+
+          function fire() { shutterFlash.restart() }
+
+          SequentialAnimation {
+            id: shutterFlash
+            // Fast in, slow out: the shape of a real shutter, and it reads as
+            // a flash rather than a flicker.
+            NumberAnimation { target: shutter; property: "opacity"; from: 0; to: 0.72; duration: 55; easing.type: Easing.OutQuad }
+            NumberAnimation { target: shutter; property: "opacity"; to: 0; duration: 340; easing.type: Easing.OutCubic }
+          }
         }
 
         // Agents drive by selector, so a real pointer position is the
@@ -622,7 +665,7 @@ Item {
                 anchors.left: parent.left
                 anchors.leftMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
-                color: row.modelData.painting ? Color.accent : Util.alpha(Color.popups.text, 0.3)
+                color: row.modelData.painting ? Color.urgent : Util.alpha(Color.popups.text, 0.3)
                 Behavior on color { ColorAnimation { duration: 220 } }
               }
 

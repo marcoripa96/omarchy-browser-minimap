@@ -126,9 +126,11 @@ QtObject {
     try { bridge.write(JSON.stringify({ select: root.selected }) + "\n") } catch (e) {}
   }
 
-  // One agent action. `x`/`y` are viewport pixels and only present for raw
-  // pointer commands; hasPoint says whether they mean anything.
-  signal actionOccurred(string label, real x, real y, bool hasPoint)
+  // One agent action. `action` is the raw command name, so surfaces can react
+  // to particular ones; `label` is the human phrasing. `x`/`y` are viewport
+  // pixels and only present for raw pointer commands, and hasPoint says
+  // whether they mean anything.
+  signal actionOccurred(string action, string label, real x, real y, bool hasPoint)
 
   function handleLine(line) {
     var msg
@@ -140,7 +142,7 @@ QtObject {
       // shows those sessions are busy.
       if (msg.session !== root.shown) return
       var hasPoint = msg.x !== undefined && msg.y !== undefined
-      actionOccurred(msg.label || msg.action, hasPoint ? msg.x : 0, hasPoint ? msg.y : 0, hasPoint)
+      actionOccurred(msg.action || "", msg.label || msg.action, hasPoint ? msg.x : 0, hasPoint ? msg.y : 0, hasPoint)
       return
     }
 
