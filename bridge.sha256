@@ -1,0 +1,9 @@
+# SHA-256 digests of the bridge binaries published for the version in
+# manifest.json. bridge.sh refuses to execute a download that does not match
+# the line for its architecture, so the executable that actually runs is bound
+# to this commit and not to whatever a mutable release asset happens to hold.
+#
+# These are produced by the release workflow, not by a local build: see
+# "Releasing" in README.md. Regenerate them for every version bump.
+e74a907f2460b02131905f32020a5205772791df011da880836856e683234f18  omarchy-browser-minimap-bridge-x86_64
+e66baacc84ca56a3064b2e6f5505be16161118ec00fc32005f59e379dce7b402  omarchy-browser-minimap-bridge-aarch64

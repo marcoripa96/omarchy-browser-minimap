@@ -4,8 +4,22 @@
 # otherwise the prebuilt binary for this machine's architecture is fetched
 # once per plugin version from the plugin repository's GitHub releases —
 # the repository named by manifest.json's homepage, so a fork downloads its
-# own releases and not upstream's. A failed or bogus download falls back to
-# the binary a previous version already cached: a stale minimap beats none.
+# own releases and not upstream's.
+#
+# A release asset is mutable, so being able to fetch it proves nothing about
+# what it contains. Every download is therefore checked against the digest
+# committed in bridge.sha256 and executed only on an exact match: the bytes
+# that run are the bytes this commit names, whatever the network, the release
+# or a compromised account later serves. A mismatch is fatal rather than
+# something to work around — there is no fallback to a binary cached by an
+# earlier version, since those bytes are not named by this commit either and
+# silently downgrading on a failed fetch would hand the choice of which
+# version runs to whoever can break the connection.
+#
+# The dev build and OMARCHY_BROWSER_MINIMAP_BRIDGE are deliberately exempt:
+# both name a local path, and anyone who can write there or set the plugin's
+# environment can already run code as this user.
+#
 # Failures are reported on stdout in the bridge's own error shape and on
 # stderr for the omarchy-shell journal.
 set -euo pipefail
@@ -42,33 +56,34 @@ case "$arch" in
   *) fail "no prebuilt bridge for $arch; build one with cargo build --release --manifest-path $here/bridge/Cargo.toml" ;;
 esac
 
+command -v sha256sum >/dev/null || fail "sha256sum is required to verify the bridge binary"
+
+asset="omarchy-browser-minimap-bridge-$arch"
+want="$(sed -n 's/^\([0-9a-f]\{64\}\)[[:space:]][[:space:]]*'"$asset"'$/\1/p' "$here/bridge.sha256" | head -n1)"
+[[ -n $want ]] || fail "bridge.sha256 names no digest for $asset"
+
+digest_of() { sha256sum <"$1" | cut -d' ' -f1; }
+
+# Keyed by digest rather than by version, so a re-tagged release or an edited
+# bridge.sha256 can never be answered by a stale cache entry.
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-browser-minimap"
-bin="$cache/bridge-$version-$arch"
+bin="$cache/bridge-$arch-$want"
 
-# The newest binary an earlier version already cached. Only exact misses fall
-# through to it — a cached copy of the *current* version is always preferred.
-fallback() {
-  local previous
-  previous="$(ls -t "$cache"/bridge-*-"$arch" 2>/dev/null | head -n1 || true)"
-  if [[ -n $previous && -x $previous ]]; then
-    echo "browser-minimap bridge.sh: $1; falling back to cached $(basename "$previous")" >&2
-    exec "$previous" "${args[@]}"
-  fi
-  fail "$1"
-}
-
-if [[ ! -x $bin ]]; then
+if [[ ! -x $bin || "$(digest_of "$bin")" != "$want" ]]; then
+  rm -f "$bin"
   mkdir -p "$cache"
-  url="${repo%/}/releases/download/v$version/omarchy-browser-minimap-bridge-$arch"
+  url="${repo%/}/releases/download/v$version/$asset"
   tmp="$bin.part.$$"
-  curl -fsSL --retry 2 -o "$tmp" "$url" || { rm -f "$tmp"; fallback "downloading the bridge binary failed: $url"; }
-  # A captive portal or intercepting proxy answers 200 with HTML; caching that
-  # under the version-keyed name would poison every later start. ELF or bust.
-  [[ "$(head -c 4 "$tmp" 2>/dev/null)" == $'\x7fELF' ]] || { rm -f "$tmp"; fallback "download from $url is not an executable"; }
+  trap 'rm -f "$tmp"' EXIT
+  curl -fsSL --retry 2 -o "$tmp" "$url" || fail "downloading the bridge binary failed: $url"
+  got="$(digest_of "$tmp")"
+  [[ $got == "$want" ]] || fail "refusing to run $url: it hashes to $got, but bridge.sha256 names $want"
   chmod +x "$tmp"
   mv "$tmp" "$bin"
-  # Binaries from versions this install has moved past are dead weight.
-  find "$cache" -maxdepth 1 -name 'bridge-*' ! -name "bridge-$version-*" -delete 2>/dev/null || true
+  trap - EXIT
 fi
+
+# Anything this version does not name is dead weight.
+find "$cache" -maxdepth 1 -name 'bridge-*' ! -name "bridge-$arch-$want" -delete 2>/dev/null || true
 
 exec "$bin" "${args[@]}"

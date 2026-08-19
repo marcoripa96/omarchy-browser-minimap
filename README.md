@@ -317,11 +317,21 @@ is dismissed are counted for the show/hide rules but never touched. Raising
 
 The bridge itself is a static binary with no runtime dependencies. `bridge.sh`
 fetches the one matching `uname -m` (x86_64 or aarch64) from this repository's
-releases the first time the plugin starts, caches it under
-`~/.cache/omarchy-browser-minimap/` keyed to the plugin version, and execs it —
-so the only tool it needs is `curl`, and only for that first run. On any other
-architecture, build it yourself: `cargo build --release` in `bridge/` produces
-a binary `bridge.sh` prefers over the download.
+releases the first time the plugin starts, checks it against the digest
+committed in `bridge.sha256`, caches it under
+`~/.cache/omarchy-browser-minimap/` beneath that digest, and execs it — so the
+tools it needs are `curl` and `sha256sum`, and `curl` only for that first run.
+On any other architecture, build it yourself: `cargo build --release` in
+`bridge/` produces a binary `bridge.sh` prefers over the download.
+
+A release asset can be replaced after the fact, so managing to fetch one proves
+nothing about what it holds. `bridge.sh` therefore runs a download only when it
+hashes to exactly what `bridge.sha256` names, which ties the executable to the
+commit you are reading rather than to whatever the release currently serves —
+including for anyone auditing this plugin at a fixed commit. A mismatch is
+fatal, and there is no falling back to a binary an earlier version cached:
+otherwise breaking the connection would be enough to choose which version of
+the bridge you run.
 
 ## Developing
 
@@ -370,7 +380,27 @@ The release workflow runs the tests, clippy and `cargo fmt --check` before it
 builds anything, so a tag with a lint failure never becomes a release.
 
 `OMARCHY_BROWSER_MINIMAP_BRIDGE` overrides the binary path outright — useful
-for pointing an installed plugin at a build in your working copy. Releasing is
-pushing a tag `v<version>` matching `manifest.json`: the release workflow
-builds static binaries for both architectures and attaches them where
-`bridge.sh` expects to find them.
+for pointing an installed plugin at a build in your working copy.
+
+### Releasing
+
+Installs verify the binary against `bridge.sha256`, so the digests have to sit
+in the commit the tag points at. They come from CI rather than from a
+`sha256sum` here, because a laptop build and a runner build of the same source
+are not byte for byte the same:
+
+1. Bump the version in `manifest.json` and `bridge/Cargo.toml`, and commit.
+2. Run the `release` workflow from the Actions tab on that branch. It builds
+   both architectures and prints their digests in the job summary; the pin
+   check only warns, since the pin is what you are about to write.
+3. Copy those two lines into `bridge.sha256`, keeping the comment header, and
+   commit.
+4. Push the tag `v<version>` matching `manifest.json`. The workflow rebuilds,
+   refuses to publish if the result does not match the committed pin, and
+   otherwise attaches both binaries where `bridge.sh` expects to find them.
+
+Step 4 rebuilding is what keeps the pin honest rather than decorative: a tag
+can only ship binaries its own commit already named. It also makes a tag final
+— re-running one after the runner images move on fails the digest check instead
+of quietly publishing different bytes under a version that installs have
+already pinned. Ship a new version instead.

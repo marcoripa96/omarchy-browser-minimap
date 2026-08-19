@@ -4,10 +4,22 @@
 # the check job enforces that a tag is `v<manifest version>` so installs can
 # always find the asset, and the release is created only after both builds
 # succeed so it can never ship with one architecture missing.
+#
+# bridge.sh executes a download only if it matches the digest committed in
+# bridge.sha256, so a release whose binaries hash to anything else would be
+# dead on arrival. The digests job therefore refuses to publish one: it
+# compares what was just built against the committed pin and fails the tag
+# rather than shipping binaries no install will consent to run.
+#
+# Those digests cannot be produced locally — a laptop build and a runner
+# build of the same source differ — so a version bump runs this workflow
+# from the Actions tab first, takes the digests from the job summary into
+# bridge.sha256, and only then tags. See "Releasing" in README.md.
 name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -16,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: tag matches manifest.json and Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME#v}"
           manifest="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -n1)"
@@ -49,8 +62,49 @@ jobs:
           name: omarchy-browser-minimap-bridge-${{ matrix.arch }}
           path: omarchy-browser-minimap-bridge-${{ matrix.arch }}
           if-no-files-found: error
-  release:
+  digests:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: assets
+      - name: report the digests this run produced
+        working-directory: assets
+        run: |
+          sha256sum omarchy-browser-minimap-bridge-* | tee built.sha256
+          {
+            echo '## Digests for `bridge.sha256`'
+            echo
+            echo 'Copy these into `bridge.sha256`, commit, then push the tag.'
+            echo
+            echo '```'
+            cat built.sha256
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      # A tag publishes binaries that every install will hash before running,
+      # so a pin that names anything else is a broken release, not a warning.
+      - name: built binaries match the committed pin
+        working-directory: assets
+        run: |
+          grep -vE '^[[:space:]]*(#|$)' ../repo/bridge.sha256 >expected.sha256
+          echo "pinned by the commit being released:"
+          cat expected.sha256
+          if sha256sum -c --strict expected.sha256; then
+            echo "match: bridge.sha256 names exactly what this run built"
+          elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            echo "::error::bridge.sha256 does not name these binaries. Update it from the digests above and re-tag; installs would refuse to run this release."
+            exit 1
+          else
+            echo "::warning::bridge.sha256 does not name these binaries yet — expected while preparing a version bump. Copy the digests above into bridge.sha256 before tagging."
+          fi
+  release:
+    needs: digests
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
