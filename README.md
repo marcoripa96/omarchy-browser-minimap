@@ -101,6 +101,21 @@ omarchy plugin add https://github.com/marcoripa96/omarchy-browser-minimap.git --
 - `agent-browser` on the box (any session, headless or headed)
 - a `node` runtime; `bridge.sh` probes the mise shim, `$PATH`, and `/usr/bin`
 
+## Developing
+
+This repo *is* the installed plugin: it lives at
+`~/.config/omarchy/plugins/io.github.marcoripa96.browser-minimap`, so edits are
+live and `git push` publishes them. `omarchy plugin update <id>` fast-forwards
+the same checkout on other machines.
+
+```bash
+omarchy plugin validate .                     # manifest contract
+qmllint -I "$OMARCHY_PATH/shell" Panel.qml    # QML errors before a restart
+omarchy restart shell                         # reload; NOT `refresh shell`,
+                                              # which resets shell.json to defaults
+journalctl --user -t omarchy-shell -f         # the shell's log
+```
+
 ## Debugging
 
 ```bash
