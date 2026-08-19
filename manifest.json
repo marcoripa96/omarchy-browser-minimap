@@ -37,7 +37,8 @@
       "maxVisibleSec": 45,
       "debug": false,
       "session": "",
-      "enabled": true
+      "enabled": true,
+      "railWidth": 132
     },
     "schema": [
       {
@@ -139,6 +140,15 @@
         "label": "Session",
         "defaultValue": "",
         "description": "agent-browser session name to pin to. Empty tracks whichever session is painting, which flips between them when two agents are running."
+      },
+      {
+        "key": "railWidth",
+        "type": "integer",
+        "label": "Session rail width (px)",
+        "min": 60,
+        "max": 260,
+        "defaultValue": 132,
+        "description": "Width of the session list shown down the left of the card when more than one session is live. It is added to the card, not taken out of the mirror."
       }
     ]
   },
@@ -158,7 +168,8 @@
       "maxVisibleSec": 45,
       "debug": false,
       "session": "",
-      "enabled": true
+      "enabled": true,
+      "railWidth": 132
     }
   }
 }

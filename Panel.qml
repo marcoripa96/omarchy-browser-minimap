@@ -84,9 +84,11 @@ Item {
   readonly property int headerHeight: showCaption
     ? root.pad + Style.font.caption + Style.font.bodySmall + Math.round(root.pad * 0.4) + root.pad
     : 0
-  readonly property int switcherHeight: showSwitcher
-    ? Math.round(root.pad * 0.75) * 2 + Style.font.caption + Style.space(6)
-    : 0
+  // The rail is extra width rather than a slice out of the mirror: the whole
+  // point of the panel is the page, so it keeps the size it was asked for and
+  // the card grows to hold the list.
+  readonly property int railWidth: showSwitcher ? Style.space(setting("railWidth", 132)) : 0
+  readonly property int rowHeight: Style.font.caption * 2 + Style.space(13)
 
   // ------------------------------------------------------------- presence
   //
@@ -261,8 +263,8 @@ Item {
 
     BorderSurface {
       id: card
-      width: card.borderLeft + root.contentWidth + card.borderRight
-      height: card.borderTop + root.headerHeight + root.shotHeight + root.switcherHeight + card.borderBottom
+      width: card.borderLeft + root.railWidth + root.contentWidth + card.borderRight
+      height: card.borderTop + root.headerHeight + root.shotHeight + card.borderBottom
       color: Util.alpha(Color.background, 0.97)
       borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
       radius: Style.cornerRadius
@@ -283,7 +285,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.topMargin: card.borderTop
-        anchors.leftMargin: card.borderLeft
+        anchors.leftMargin: card.borderLeft + root.railWidth
         anchors.rightMargin: card.borderRight
 
         Rectangle {
@@ -334,7 +336,7 @@ Item {
         anchors.top: root.showCaption ? header.bottom : parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: card.borderLeft
+        anchors.leftMargin: card.borderLeft + root.railWidth
         anchors.rightMargin: card.borderRight
         anchors.topMargin: root.showCaption ? 0 : card.borderTop
         height: root.shotHeight
@@ -390,88 +392,110 @@ Item {
         }
       }
 
-      // One chip per live session, only once there is a choice to make. The
-      // shown session is filled in; an outline on it means the bridge picked it
-      // automatically and will keep re-picking as sessions get busy.
+      // One row per live session, down the left edge. Only appears once there
+      // is a choice to make, so the single-session case stays a plain mirror.
+      // The filled row is the one being shown; the accent marker down its left
+      // edge means it is pinned there by hand rather than picked automatically.
       Item {
-        id: switcher
+        id: rail
         visible: root.showSwitcher
-        height: root.switcherHeight
-        anchors.top: viewport.bottom
+        width: root.railWidth
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
         anchors.left: parent.left
-        anchors.right: parent.right
+        anchors.topMargin: card.borderTop
+        anchors.bottomMargin: card.borderBottom
         anchors.leftMargin: card.borderLeft
-        anchors.rightMargin: card.borderRight
+        clip: true
 
         Rectangle {
           anchors.fill: parent
           color: Util.alpha(Color.popups.text, 0.05)
         }
 
-        Row {
+        // Hairline against the mirror, so the page never looks like it bleeds
+        // into the list.
+        Rectangle {
+          width: Math.max(1, Style.space(1))
+          height: parent.height
+          anchors.right: parent.right
+          color: Util.alpha(Color.popups.text, 0.12)
+        }
+
+        Column {
+          anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.leftMargin: root.pad
-          anchors.rightMargin: root.pad
-          spacing: Math.round(root.pad * 0.5)
+          anchors.topMargin: Math.round(root.pad * 0.6)
+          spacing: Math.max(1, Style.space(1))
 
           Repeater {
-            // No point building chips for a switcher that is not on screen.
             model: root.showSwitcher ? root.sessions : []
 
-            Rectangle {
-              id: chip
+            Item {
+              id: row
               required property var modelData
               readonly property bool isShown: root.svc && modelData.name === root.svc.shown
-              readonly property bool isPinned: root.svc && modelData.name === root.svc.selected
+              // The page is what you recognise a session by; the session name
+              // is an agent-browser implementation detail.
+              readonly property string label: modelData.title !== "" ? modelData.title : modelData.name
 
-              height: Style.font.caption + Style.space(6)
-              width: Math.min(chipLabel.implicitWidth + chipDot.width + Style.space(14),
-                              Math.round(switcher.width / Math.max(1, root.sessionCount)) - root.pad)
-              radius: Math.max(2, Style.cornerRadius)
-              color: chip.isShown ? Util.alpha(Color.accent, 0.22) : Util.alpha(Color.popups.text, 0.07)
-              border.width: chip.isPinned ? Math.max(1, Style.space(1)) : 0
-              border.color: Color.accent
+              width: rail.width
+              height: root.rowHeight
 
               Rectangle {
-                id: chipDot
+                anchors.fill: parent
+                color: row.isShown ? Util.alpha(Color.accent, 0.18)
+                  : (rowMouse.containsMouse ? Util.alpha(Color.popups.text, 0.07) : "transparent")
+                Behavior on color { ColorAnimation { duration: 120 } }
+              }
+
+              Rectangle {
+                width: Math.max(2, Style.space(2))
+                height: parent.height
+                anchors.left: parent.left
+                visible: row.isShown
+                color: Color.accent
+              }
+
+              Rectangle {
+                id: rowDot
                 width: Style.space(5)
                 height: width
                 radius: width / 2
                 anchors.left: parent.left
-                anchors.leftMargin: Style.space(5)
+                anchors.leftMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
-                color: chip.modelData.painting ? Color.accent : Util.alpha(Color.popups.text, 0.3)
+                color: row.modelData.painting ? Color.accent : Util.alpha(Color.popups.text, 0.3)
                 Behavior on color { ColorAnimation { duration: 220 } }
               }
 
               Text {
-                id: chipLabel
-                anchors.left: chipDot.right
-                anchors.leftMargin: Style.space(4)
+                anchors.left: rowDot.right
+                anchors.leftMargin: Style.space(5)
                 anchors.right: parent.right
-                anchors.rightMargin: Style.space(5)
+                anchors.rightMargin: Style.space(6)
                 anchors.verticalCenter: parent.verticalCenter
-                text: chip.modelData.name
+                text: row.label
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
-                color: chip.isShown ? Color.popups.text : Util.alpha(Color.popups.text, 0.6)
+                color: row.isShown ? Color.popups.text : Util.alpha(Color.popups.text, 0.65)
                 elide: Text.ElideRight
-                maximumLineCount: 1
+                maximumLineCount: 2
+                wrapMode: Text.Wrap
               }
 
               MouseArea {
+                id: rowMouse
                 anchors.fill: parent
                 enabled: !root.clickThrough
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                // Clicking the session already pinned releases it back to
-                // automatic, so one control both pins and unpins.
-                onClicked: {
-                  if (!root.svc) return
-                  if (chip.isPinned) root.svc.clearSelection()
-                  else root.svc.select(chip.modelData.name)
-                }
+                // Picking a session is the whole interaction: no modes, no
+                // way to land somewhere you did not choose. Following the
+                // busiest session automatically is what happens until you
+                // pick, and `auto` over IPC returns to it.
+                onClicked: if (root.svc) root.svc.select(row.modelData.name)
               }
             }
           }
@@ -480,8 +504,8 @@ Item {
 
       MouseArea {
         anchors.fill: parent
-        // Sits under the chips: the switcher's own areas take their clicks
-        // first, and everything else toggles size or dismisses.
+        // Sits under the rail: its rows take their own clicks first, and
+        // everything else toggles size or dismisses.
         z: -1
         enabled: !root.clickThrough
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton

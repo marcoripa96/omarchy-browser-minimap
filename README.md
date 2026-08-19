@@ -41,17 +41,21 @@ flicker at any usable frame rate.
 
 ## Several sessions at once
 
-![The session switcher with three live sessions](preview-switcher.png)
-
 Every connected session is tracked, but only one is mirrored at a time. With
-more than one live, a row of chips appears along the bottom: a filled chip is
-the one being shown, an outlined one is pinned by hand, and each chip's dot
-lights up while that session's page is painting.
+more than one live, a rail appears down the left of the card listing them by
+page title — what you actually recognise a session by, rather than the
+`default`/`docs` names agent-browser uses internally. Each row carries a dot
+that lights up while that session's page is painting, so you can see a
+background agent working without switching to it.
 
-Unpinned, the minimap follows whichever session painted most recently — which
-in practice means a page that animates on its own wins permanently over one
-that is merely being worked on. Click a chip to pin it, click the pinned chip
-to release it, or middle-click anywhere on the card to cycle.
+Click a row to watch that session. Until you click, the minimap follows
+whichever session painted most recently, which in practice means a page that
+animates on its own wins over one that is merely being worked on — clicking is
+how you say which one you actually care about. `auto` over IPC goes back to
+following the busiest.
+
+The rail is extra width rather than a slice out of the mirror, so the page
+keeps the size you asked for and the card grows to hold the list.
 
 ## When it shows and when it goes away
 
@@ -82,7 +86,7 @@ screencast that keeps ticking over an unchanged page does not read as activity.
 | Card | left | Toggle between `width` and `expandedWidth` |
 | Card | right | Dismiss this stretch of visibility |
 | Card | middle | Cycle the shown session |
-| Chip | left | Pin that session, or release it if already pinned |
+| Rail row | left | Watch that session |
 
 The bar glyph shows one thing only: white when the plugin is on, dimmed grey
 when it is off. Whether a page is currently painting shows on the panel's own
@@ -138,13 +142,14 @@ back from where it was saved.
 | `monitor`       | ""      | Output name to pin to (e.g. `HDMI-A-1`); empty follows focus         |
 | `idleHideSec`   | 8       | Hide after this long without a visual change; 0 disables rule 1      |
 | `maxVisibleSec` | 45      | Cap on one stretch of visibility; 0 disables rule 2                  |
+| `railWidth`     | 132     | Width of the session rail, added to the card rather than the mirror  |
 | `session`       | ""      | Hard pin: the bridge only ever connects to this session              |
 | `debug`         | false   | Log show/hide reasoning to the `omarchy-shell` journal tag           |
 
-`session` and the chip switcher are different things. `session` is durable and
-narrows what the bridge watches at all; the chips are a runtime choice among the
-sessions it is already watching, and are deliberately not persisted — a session
-name from an hour ago means nothing after a restart.
+`session` and the rail are different things. `session` is durable and narrows
+what the bridge watches at all; the rail is a runtime choice among the sessions
+it is already watching, and is deliberately not persisted — a session name from
+an hour ago means nothing after a restart.
 
 Changes to `fps` and `session` restart the bridge; the rest apply live.
 
