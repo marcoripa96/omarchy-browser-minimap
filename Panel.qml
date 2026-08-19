@@ -108,9 +108,26 @@ Item {
     ? svc.viewportH / svc.viewportW : 0.625
   readonly property int shotHeight: Math.round(contentWidth * aspect)
   readonly property int pad: Style.space(8)
+  readonly property int headerGap: Math.round(root.pad * 0.4)
+  // Measured from the fonts, not guessed from their pixel sizes. A rendered
+  // line box is several pixels taller than the size it was asked for, and
+  // reserving the smaller number let the two lines grow into the bottom
+  // padding until the route sat flush against the mirror.
   readonly property int headerHeight: showCaption
-    ? root.pad + Style.font.caption + Style.font.bodySmall + Math.round(root.pad * 0.4) + root.pad
+    ? root.pad + Math.ceil(titleMetrics.height) + root.headerGap
+      + Math.ceil(routeMetrics.height) + root.pad
     : 0
+
+  FontMetrics {
+    id: titleMetrics
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+  FontMetrics {
+    id: routeMetrics
+    font.family: Style.font.family
+    font.pixelSize: Style.font.bodySmall
+  }
   // The rail is extra width rather than a slice out of the mirror: the whole
   // point of the panel is the page, so it keeps the size it was asked for and
   // the card grows to hold the list.
@@ -416,7 +433,7 @@ Item {
           anchors.rightMargin: root.pad
           anchors.top: parent.top
           anchors.topMargin: root.pad
-          spacing: Math.round(root.pad * 0.4)
+          spacing: root.headerGap
 
           Item {
             id: titleRow
